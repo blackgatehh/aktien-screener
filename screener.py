@@ -381,6 +381,29 @@ def run(refresh_fund: bool) -> None:
         lambda ts: (datetime.fromtimestamp(ts, timezone.utc) - now).days if np.isfinite(ts) else np.nan)
     res["earnings_soon"] = res["earnings_days"].between(0, 14)
 
+    # Handelbarkeit: Einstieg (Kurs in der Zone, sonst Zonenmitte), Abstände, Zeit bis T1, Knock-out-Hebel
+    def tradeable(r):
+        if r["setup"] not in ("long", "short") or not np.isfinite(r["zone_lo"]):
+            return pd.Series({"entry": np.nan, "pot_t1_pct": np.nan, "risk_pct": np.nan, "crv_entry": np.nan,
+                              "weeks_t1": np.nan, "ko_level": np.nan, "ko_leverage": np.nan})
+        longs = r["setup"] == "long"
+        inzone = r["zone_lo"] <= r["close"] <= r["zone_hi"]
+        entry = r["close"] if inzone else (r["zone_lo"] + r["zone_hi"]) / 2
+        a = r["atr_pct"] / 100 * r["close"]
+        pot = (r["t1"] / entry - 1) * 100 if longs else (1 - r["t1"] / entry) * 100
+        risk = abs(r["stop"] / entry - 1) * 100
+        ko = r["stop"] - 2 * a if longs else r["stop"] + 2 * a
+        n_atr = abs(r["t1"] - entry) / a if a > 0 else np.nan
+        return pd.Series({"entry": entry, "pot_t1_pct": pot, "risk_pct": risk,
+                          "crv_entry": pot / risk if risk > 0 else np.nan,
+                          "weeks_t1": (n_atr ** 2) / 5 if np.isfinite(n_atr) else np.nan,  # Random-Walk-Näherung
+                          "ko_level": ko, "ko_leverage": entry / abs(entry - ko) if entry != ko else np.nan})
+
+    res = pd.concat([res, res.apply(tradeable, axis=1)], axis=1)
+    # Vorauswahl für den Top-10-Bericht: Note A/B, nah an der Zone, CRV ab Einstieg ≥ 2, Stop ≤ 10 % entfernt
+    res["report_candidate"] = (res["grade"].isin(["A", "B"]) & (res["crv_entry"] >= 2) & (res["risk_pct"] <= 10)
+                               & (res["zone_dist_pct"].abs() <= 5) & (res["status"] != "Setup gebrochen"))
+
     # Kandidatenlisten
     longs = res[(res["setup"] == "long") & res["grade"].isin(["A", "B", "C"])].sort_values("score", ascending=False)
     shorts = res[(res["setup"] == "short") & res["grade"].isin(["A", "B", "C"])].sort_values("score", ascending=False)
@@ -395,7 +418,8 @@ def run(refresh_fund: bool) -> None:
             "val_label", "val_badge", "quality", "qual_label", "fwd_pe", "ev_ebitda", "gap_below_from",
             "gap_below_to", "gap_below_dist_pct", "gap_above_from", "gap_above_to", "gap_above_dist_pct",
             "swing_high", "swing_high_date", "swing_low", "swing_low_date", "earnings_days", "earnings_soon",
-            "target_mean"]
+            "target_mean", "entry", "pot_t1_pct", "risk_pct", "crv_entry", "weeks_t1", "ko_level", "ko_leverage",
+            "report_candidate"]
     cols = [c for c in cols if c in res.columns]
 
     def records(df: pd.DataFrame, n: int) -> list[dict]:
@@ -412,6 +436,7 @@ def run(refresh_fund: bool) -> None:
         "top_short": records(shorts, 15),
         "breakouts": records(breakouts, 10),
         "gap_fill_watch": records(gapfill, 15),
+        "report_pool": records(res[res["report_candidate"]].sort_values("score", ascending=False), 40),
         "grade_counts": res["grade"].value_counts().to_dict(),
     }
     with open(os.path.join(DATA, "screener_latest.json"), "w", encoding="utf-8") as fh:
