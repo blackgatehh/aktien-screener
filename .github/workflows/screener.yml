@@ -1,0 +1,47 @@
+name: Aktien-Screener
+
+on:
+  schedule:
+    # Mo–Fr 21:20 UTC = 22:20 Uhr MEZ (23:20 MESZ), nach US-Börsenschluss
+    - cron: "20 21 * * 1-5"
+    # So 06:00 UTC: Fundamentaldaten neu laden
+    - cron: "0 6 * * 0"
+  workflow_dispatch:
+    inputs:
+      fundamentals:
+        description: "Fundamentaldaten neu laden"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: screener
+  cancel-in-progress: false
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Screener ausführen
+        run: |
+          if [ "${{ github.event.schedule }}" = "0 6 * * 0" ] || [ "${{ inputs.fundamentals }}" = "true" ]; then
+            python screener.py --fundamentals
+          else
+            python screener.py
+          fi
+      - name: Ergebnisse speichern
+        run: |
+          git config user.name "screener-bot"
+          git config user.email "screener-bot@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "Screener $(date -u +'%Y-%m-%d %H:%M') UTC"
+          git push
