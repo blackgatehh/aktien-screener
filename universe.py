@@ -43,7 +43,12 @@ EXCHANGE_SUFFIX = {
 
 def _tables(url: str) -> list[pd.DataFrame]:
     html = requests.get(url, headers=UA, timeout=30).text
-    return pd.read_html(io.StringIO(html))
+    out = []
+    for df in pd.read_html(io.StringIO(html)):
+        if isinstance(df.columns, pd.MultiIndex):  # mehrzeilige Kopfzeilen glätten
+            df.columns = [" ".join(str(x) for x in col if "Unnamed" not in str(x)).strip() for col in df.columns]
+        out.append(df)
+    return out
 
 
 def _pick_col(df: pd.DataFrame, names: list[str]) -> str | None:
@@ -73,8 +78,10 @@ def fetch_sp500() -> list[str]:
 def fetch_nasdaq100() -> list[str]:
     for df in _tables("https://en.wikipedia.org/wiki/Nasdaq-100"):
         col = _pick_col(df, ["ticker", "symbol"])
-        if col is not None and 90 <= len(df) <= 110:
-            return [_yahoo_us(_clean(s)) for s in df[col]]
+        if col is not None and 95 <= len(df) <= 115:
+            syms = [_yahoo_us(_clean(s)) for s in df[col] if str(s).strip() and str(s) != "nan"]
+            if sum(s.isupper() for s in syms) >= 90:
+                return syms
     raise RuntimeError("Nasdaq-100 Tabelle nicht gefunden")
 
 

@@ -88,13 +88,15 @@ def swing(df: pd.DataFrame, lookback: int = 260) -> dict | None:
     def retrace(a, b) -> float:  # Anteil, um den der Kurs die Bewegung a→b zurückgelaufen ist
         return (b[1] - last) / (b[1] - a[1]) if b[1] != a[1] else np.nan
 
-    # Der letzte Wendepunkt ist der laufende Extrempunkt der aktuellen Korrektur.
-    # Relevante Bewegung ist daher die davor (piv[-3] → piv[-2]). Ist sie schon überschritten
-    # (Trend läuft weiter) oder ganz zurückgelaufen (Trendwechsel), gilt die jüngste Bewegung.
-    if len(piv) >= 3 and 0 <= retrace(piv[-3], piv[-2]) <= 1:
-        (i1, p1, k1), (i2, p2, k2) = piv[-3], piv[-2]
-    else:
-        (i1, p1, k1), (i2, p2, k2) = piv[-2], piv[-1]
+    # Kandidaten: die jüngste Bewegung (bis zum laufenden Extrempunkt) und die davor.
+    # Relevant ist die größere der beiden, innerhalb derer der Kurs gerade steht
+    # (Rücklauf zwischen 0 und 100 %). So wird eine kleine Gegenbewegung nicht mit dem Trend verwechselt.
+    cands = [(piv[-2], piv[-1])]
+    if len(piv) >= 3:
+        cands.append((piv[-3], piv[-2]))
+    inside = [c for c in cands if 0 <= retrace(*c) <= 1]
+    a, b = max(inside, key=lambda c: abs(c[1][1] - c[0][1])) if inside else cands[0]
+    (i1, p1, k1), (i2, p2, k2) = a, b
     H, L = (p2, p1) if k2 == "H" else (p1, p2)
     hi_i, lo_i = (i2, i1) if k2 == "H" else (i1, i2)
     return {
