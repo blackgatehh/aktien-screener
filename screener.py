@@ -73,8 +73,14 @@ def load_fundamentals(tickers: list[str], refresh: bool) -> pd.DataFrame:
             "earningsGrowth", "shortPercentOfFloat", "earningsTimestamp", "recommendationMean", "targetMeanPrice"]
     for i, t in enumerate(tickers):
         try:
-            info = yf.Ticker(t).info
-            rows.append({"ticker": t, **{k: info.get(k) for k in keys}})
+            tk = yf.Ticker(t)
+            info = tk.info
+            try:
+                isin = tk.isin
+            except Exception:  # noqa: BLE001
+                isin = None
+            rows.append({"ticker": t, **{k: info.get(k) for k in keys},
+                         "isin": isin if isin and isin != "-" else None})
         except Exception as exc:  # noqa: BLE001
             print(f"[fund] {t}: {exc}")
         if i % 50 == 49:
@@ -368,6 +374,9 @@ def run(refresh_fund: bool) -> None:
             r["ev_ebitda"] = _num(f.get("enterpriseToEbitda"))
             r["earnings_ts"] = _num(f.get("earningsTimestamp"))
             r["target_mean"] = _num(f.get("targetMeanPrice"))
+            isin = f.get("isin") if "isin" in f.index else None
+            r["isin"] = isin if isinstance(isin, str) and len(isin) == 12 else None
+            r["wkn"] = isin[5:11] if r["isin"] and isin.startswith("DE") else None
         rows.append(r)
 
     res = pd.DataFrame(rows)
@@ -412,7 +421,7 @@ def run(refresh_fund: bool) -> None:
     gapfill = res[(res["gap_below_dist_pct"] > -6) & (res["close"] > res["sma200"]) & res["sma200_rising"]] \
         .sort_values("gap_below_dist_pct", ascending=False)
 
-    cols = ["ticker", "name", "region", "indices", "sector", "date", "close", "grade", "score", "setup", "status",
+    cols = ["ticker", "name", "isin", "wkn", "currency", "region", "indices", "sector", "date", "close", "grade", "score", "setup", "status",
             "zone_lo", "zone_hi", "stop", "t1", "t2", "crv", "candle", "rsi", "atr_pct", "sma200", "sma200_rising",
             "ema20", "ema50", "dist_hi52_pct", "rel_bench_pp", "vol_ratio", "momentum", "mom_label", "valuation",
             "val_label", "val_badge", "quality", "qual_label", "fwd_pe", "ev_ebitda", "gap_below_from",

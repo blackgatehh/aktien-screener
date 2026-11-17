@@ -53,6 +53,7 @@
   <div class="card" id="report" hidden>
     <h2>Claudes Tagesbericht <span class="sub" id="repdate"></span></h2>
     <div id="repsum"></div>
+    <img id="repimg" alt="Top-10-Übersicht mit Confidence und Zonen" style="width:100%;border-radius:10px;margin-top:10px" hidden>
     <div id="picks"></div>
   </div>
 
@@ -184,11 +185,13 @@
     $('#report').hidden=false;
     $('#repdate').textContent='· '+rep.date;
     $('#repsum').textContent=rep.summary||'';
+    const img=$('#repimg'); img.src='data/report_latest.png'+bust; img.onload=()=>img.hidden=false;
     const box=$('#picks'); box.textContent='';
     (rep.picks||[]).forEach(p=>{
       const d=el('div',null,'pick');
-      const h=el('div',null,'row'); h.append(grade(p.grade), el('b', `${p.name||p.ticker} (${p.ticker}) · ${p.setup==='short'?'Short':'Long'}`));
-      d.append(h, el('div', p.comment||''));
+      const h=el('div',null,'row'); h.append(el('b', `${p.rank||''}. ${p.name||p.ticker} · ${p.setup==='short'?'Short':'Long'} · ${p.category||''}`));
+      const id=[p.isin?('ISIN '+p.isin):'', p.wkn?('WKN '+p.wkn):'', p.ticker].filter(Boolean).join(' · ');
+      d.append(h, el('div', id, 'sub'), el('div', p.comment||''));
       if(p.risks) d.append(el('div','Risiko: '+p.risks,'sub'));
       box.append(d);
     });
