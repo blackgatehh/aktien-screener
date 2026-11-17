@@ -14,6 +14,7 @@ Ausgabe in data/:
 from __future__ import annotations
 
 import argparse
+import re
 import json
 import math
 import os
@@ -365,7 +366,8 @@ def run(refresh_fund: bool) -> None:
         r["region"] = region_of(u["indices"])
         if t in fund.index:
             f = fund.loc[t]
-            r["name"] = f.get("shortName") or t
+            nm = str(f.get("shortName") or t)
+            r["name"] = re.sub(r"\s{2,}\S{0,2}$", "", nm).strip()  # yfinance hängt bei Xetra-Titeln Füllzeichen an
             r["sector"] = f.get("sector")
             r["currency"] = f.get("currency")
             r["valuation"], r["val_badge"] = valuation_score(f)
