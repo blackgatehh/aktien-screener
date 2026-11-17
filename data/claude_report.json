@@ -1,0 +1,86 @@
+{
+ "date": "2026-11-17",
+ "summary": "Markt neutral (USA/DE/EU über SMA200, VIX 22,9). Top 10: CF (Einstieg jetzt), TDG-Short (Limit), ALGN-Short (Einstieg jetzt). Gestrichen wegen Prognoseanhebung gegen Short: KBX, TKO, NCLH, CEG. HPQ erst nach den Zahlen (24.11.). Offen: TTWO-Short 3 % vor T1, Eventim +6 % vor Kapitalmarkttag 20.11. Confidence noch nicht kalibriert.",
+ "picks": [
+  {
+   "ticker": "CF",
+   "name": "CF Industries",
+   "setup": "long",
+   "grade": "B",
+   "comment": "Einstieg jetzt · Confidence 87 – in der Kaufzone 116–121, Q3 über Erwartung (Umsatz +12 %). Direkt oder KO (Schwelle 102,5, Hebel 6,9). Stop 111,7 (−6,8 %), T1 141,7 (+18 %), CRV 2,7.",
+   "risks": "Keine Umkehrkerze bisher; Düngerpreise/Gas volatil"
+  },
+  {
+   "ticker": "TDG",
+   "name": "TransDigm",
+   "setup": "short",
+   "grade": "B",
+   "comment": "Limit setzen · Confidence 83 – Short-Limit 1.232 (Zone 1.215–1.249), bärisches Engulfing, FY27-Ausblick unter Erwartung. KO-Short (Schwelle 1.358,6, Hebel 9,8). Stop 1.285,7 (+4,3 %), T1 1.071 (−13 %), CRV 3,0.",
+   "risks": "Kurs 1 % unter Zone – Limit wird evtl. nicht gefüllt; Luftfahrt-Rückenwind"
+  },
+  {
+   "ticker": "ALGN",
+   "name": "Align Technology",
+   "setup": "short",
+   "grade": "A",
+   "comment": "Einstieg jetzt · Confidence 81 – in der Short-Zone mit bärischem Engulfing, Umsatzausblick 2026 gesenkt. KO-Short (Schwelle 186,4, Hebel 8,1). Stop 174,7 (+5,3 %), T1 138 (−17 %), CRV 3,2.",
+   "risks": "Aktienrückkauf 270 Mio. $ (ASR) stützt den Kurs"
+  },
+  {
+   "ticker": "SYK",
+   "name": "Stryker",
+   "setup": "short",
+   "grade": "B",
+   "comment": "Einstieg jetzt · Confidence 79 – in der Short-Zone, Q3 verfehlt, Prognose 2026 gesenkt. Kein KO (CRV 2,2 < 2,5). Stop 330,6 (+6,4 %), T1 267 (−14 %).",
+   "risks": "Qualitätswert, Short-Squeeze bei Erholung des Ortho-Geschäfts"
+  },
+  {
+   "ticker": "GM",
+   "name": "General Motors",
+   "setup": "long",
+   "grade": "B",
+   "comment": "Einstieg jetzt · Confidence 78 – in der Kaufzone 81,9–84,1, Q3-Beat, Prognose angehoben, 20 Mrd. $ Rückkauf. Direkt (CRV 2,2 für KO zu niedrig). Stop 79,1 (−5,5 %), T1 93,7 (+12 %).",
+   "risks": "Zölle/EV-Abschreibungen, zyklisch"
+  },
+  {
+   "ticker": "NUE",
+   "name": "Nucor",
+   "setup": "long",
+   "grade": "B",
+   "comment": "Beobachten · Confidence 77 – in der Kaufzone, aber Shooting-Star-Kerze: auf bullische Bestätigung warten. Danach Direkt oder KO (Schwelle 222,3, Hebel 8,3). Stop 241,8 (−4,3 %), T1 287,7 (+14 %), CRV 3,2.",
+   "risks": "Shooting Star = Verkaufsdruck; Stahlpreise"
+  },
+  {
+   "ticker": "PEG",
+   "name": "PSEG",
+   "setup": "short",
+   "grade": "B",
+   "comment": "Einstieg jetzt · Confidence 76 – in der Short-Zone, RSI 66, Prognose nur bestätigt. KO-Short mit Hebel max. 10 (Schwelle ca. 83,7 statt 81,0). Stop 78,3 (+3 %), T1 66,2 (−13 %), CRV 4,4.",
+   "risks": "Langsamer Trade (2–3 Monate), Versorger bei Risk-off gefragt"
+  },
+  {
+   "ticker": "DTE",
+   "name": "DTE Energy",
+   "setup": "short",
+   "grade": "B",
+   "comment": "Einstieg jetzt · Confidence 76 – in der Short-Zone, RSI 67. KO-Short mit Hebel max. 10 (Schwelle ca. 153,9). Stop 144,5 (+3,3 %), T1 119,7 (−14 %), CRV 4,4.",
+   "risks": "Data-Center-Story und Vantage-Verkauf sind Long-Argumente; langsam (ca. 3 Monate)"
+  },
+  {
+   "ticker": "XOM",
+   "name": "ExxonMobil",
+   "setup": "long",
+   "grade": "B",
+   "comment": "Limit setzen · Confidence 73 – Limit 158,6 (Zone 155,4–161,7, Kurs 3,2 % darüber). Direkt. Stop 151,1 (−4,7 %), T1 188,5 (+19 %), CRV 4,0.",
+   "risks": "Ölpreis schwach; Limit evtl. nicht erreicht"
+  },
+  {
+   "ticker": "LMT",
+   "name": "Lockheed Martin",
+   "setup": "long",
+   "grade": "B",
+   "comment": "Limit setzen · Confidence 72 – Limit 567,6 (Zone 558–577, Kurs 1,4 % darüber). Direkt. Stop 539,2 (−5 %), T1 657 (+16 %), CRV 3,2.",
+   "risks": "Haushalts-/Rüstungspolitik, Momentum nach Oktober-Rally abgekühlt"
+  }
+ ]
+}
