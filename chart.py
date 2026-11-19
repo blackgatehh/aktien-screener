@@ -61,6 +61,12 @@ def chart_frame(df: pd.DataFrame) -> pd.DataFrame:
     dn = (-d.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
     out["rsi"] = (100 - 100 / (1 + up / dn.replace(0, np.nan))).values
     out["rng_pct60"] = pd.Series((h - l) / c).rolling(60).mean().values * 100
+    d2u = d.clip(lower=0).ewm(alpha=1 / 2, adjust=False).mean()
+    d2d = (-d.clip(upper=0)).ewm(alpha=1 / 2, adjust=False).mean()
+    out["rsi2"] = (100 - 100 / (1 + d2u / d2d.replace(0, np.nan))).values
+    out["ret126"] = (pd.Series(c) / pd.Series(c).shift(126) - 1).values * 100
+    out["hi252_atr"] = (pd.Series(h).rolling(252, min_periods=120).max().values - c) / out["atr"].values
+    out["lo252_atr"] = (c - pd.Series(l).rolling(252, min_periods=120).min().values) / out["atr"].values
     return out
 
 
@@ -194,10 +200,11 @@ def candle_at(f: pd.DataFrame, t: int) -> str:
 # ------------------------------------------------------------------- Merkmale
 FEATURES = ["trend_aligned", "trend_against", "stack", "slope200", "d200_atr", "x50_200_aligned", "x20_50_aligned",
             "x5_13_turn", "retrace", "zone_in", "zone_dist_abs", "conf_ema", "trigger", "rsi_turn", "rsi_side",
-            "crv", "t1_atr", "atr_pct", "bars_since_extreme", "bench_aligned", "is_short"]
+            "crv", "t1_atr", "atr_pct", "bars_since_extreme", "bench_aligned", "is_short",
+            "rs126", "ext_atr", "rsi2_side"]
 
 
-def features(f: pd.DataFrame, t: int, st: dict, bench_side: float = 0.0) -> dict:
+def features(f: pd.DataFrame, t: int, st: dict, bench_side: float = 0.0, bench_ret126: float = 0.0) -> dict:
     """Modellmerkmale eines Setups. Alle Richtungsgrößen sind so gedreht, dass + = für den Trade."""
     r = f.iloc[t]
     s = 1.0 if st["setup"] == "long" else -1.0
@@ -235,6 +242,11 @@ def features(f: pd.DataFrame, t: int, st: dict, bench_side: float = 0.0) -> dict
         "bars_since_extreme": float(min(st["bars_since_extreme"], 120)),
         "bench_aligned": float(s * bench_side),
         "is_short": float(s < 0),
+        # relative Stärke 6 Monate zum Index (in Tradingrichtung), Abstand zum 52-W-Extrem, Kurzfrist-Überdehnung
+        "rs126": float(np.clip(s * ((r["ret126"] if np.isfinite(r["ret126"]) else 0) - bench_ret126), -80, 80)),
+        "ext_atr": float(np.clip((r["hi252_atr"] if s > 0 else r["lo252_atr"]), 0, 40)) if np.isfinite(
+            r["hi252_atr"] if s > 0 else r["lo252_atr"]) else 10.0,
+        "rsi2_side": float(s * ((r["rsi2"] if np.isfinite(r["rsi2"]) else 50) - 50) / 50),
     }
 
 
@@ -242,6 +254,14 @@ def trend_ok(st: dict, r: pd.Series | dict) -> bool:
     """Harter Trendfilter (Framework v3): nur mit dem übergeordneten EMA-Trend handeln."""
     tc = trend_class(r)
     return (st["setup"] == "long" and tc == "auf") or (st["setup"] == "short" and tc == "ab")
+
+
+def bench_ret_series(bench: pd.DataFrame | None, index: pd.Index) -> pd.Series:
+    """126-Tage-Rendite des Vergleichsindex in % (auf die Tage des Titels gelegt)."""
+    if bench is None or len(bench) < 140:
+        return pd.Series(0.0, index=index)
+    c = bench["Close"]
+    return ((c / c.shift(126) - 1) * 100).reindex(index, method="ffill").fillna(0.0)
 
 
 def bench_side_series(bench: pd.DataFrame | None, index: pd.Index) -> pd.Series:

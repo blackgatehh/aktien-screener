@@ -55,29 +55,39 @@ def simulate(f: pd.DataFrame, t: int, st: dict) -> dict | None:
         return None
     # Ab dem Füll-Tag selbst (bei Limit) bzw. ab dem Folgetag (bei Schlusskurs-Einstieg)
     start = fill if fill != t else t + 1
+    # Größte Bewegung zugunsten des Trades (in R), bevor der Stop fällt – für die Wahl eines realistischen Ziels
+    mfe, stop_bar = 0.0, None
+    for j in range(start, min(n, fill + 1 + MAX_BARS)):
+        if (longs and lo[j] <= stop) or (not longs and hi[j] >= stop):
+            stop_bar = j - fill
+            break
+        fav = (hi[j] - entry) / risk if longs else (entry - lo[j]) / risk
+        mfe = max(mfe, fav)
+    extra = {"mfe_R": round(mfe, 3), "stop_bar": stop_bar if stop_bar is not None else -1}
     for j in range(start, min(n, fill + 1 + MAX_BARS)):
         if longs:
             if lo[j] <= stop:
                 px = min(op[j], stop) if j > fill else stop
-                return {"filled": 1, "win": 0, "R": (px - entry) / risk, "bars": j - fill, "end": "stop"}
+                return {"filled": 1, "win": 0, "R": (px - entry) / risk, "bars": j - fill, "end": "stop", **extra}
             if hi[j] >= t1:
-                return {"filled": 1, "win": 1, "R": (t1 - entry) / risk, "bars": j - fill, "end": "t1"}
+                return {"filled": 1, "win": 1, "R": (t1 - entry) / risk, "bars": j - fill, "end": "t1", **extra}
         else:
             if hi[j] >= stop:
                 px = max(op[j], stop) if j > fill else stop
-                return {"filled": 1, "win": 0, "R": (entry - px) / risk, "bars": j - fill, "end": "stop"}
+                return {"filled": 1, "win": 0, "R": (entry - px) / risk, "bars": j - fill, "end": "stop", **extra}
             if lo[j] <= t1:
-                return {"filled": 1, "win": 1, "R": (entry - t1) / risk, "bars": j - fill, "end": "t1"}
+                return {"filled": 1, "win": 1, "R": (entry - t1) / risk, "bars": j - fill, "end": "t1", **extra}
     j = min(n - 1, fill + MAX_BARS)
     if j - fill < MAX_BARS:  # noch offen (Daten enden) → nicht werten
         return None
     r = (cl[j] - entry) / risk * (1 if longs else -1)
-    return {"filled": 1, "win": 0, "R": r, "bars": MAX_BARS, "end": "zeit"}
+    return {"filled": 1, "win": 0, "R": r, "bars": MAX_BARS, "end": "zeit", **extra}
 
 
 def signals_for(t_name: str, df: pd.DataFrame, bench: pd.DataFrame | None) -> list[dict]:
     f = chart.chart_frame(df)
     bside = chart.bench_side_series(bench, f.index).values
+    bret = chart.bench_ret_series(bench, f.index).values
     out = []
     for t in range(260, len(f) - 1):
         st = chart.setup_at(f, t)
@@ -94,7 +104,7 @@ def signals_for(t_name: str, df: pd.DataFrame, bench: pd.DataFrame | None) -> li
                "key": f"{t_name}|{st['hi_idx']}|{st['lo_idx']}", "trend": chart.trend_class(f.iloc[t]),
                "stack_raw": float(f["stack"].values[t]), **res}
         if res.get("filled"):
-            row.update(chart.features(f, t, st, bside[t]))
+            row.update(chart.features(f, t, st, bside[t], bret[t]))
         out.append(row)
     return out
 

@@ -245,6 +245,7 @@ def analyse(t: str, df: pd.DataFrame, bench: pd.DataFrame | None) -> dict:
     # Wahrscheinlichkeit heute und Beständigkeit: dasselbe Setup (gleicher Swing) an den Vortagen
     if MODEL and not st["broken"]:
         bs = chart.bench_side_series(bench, f.index).values
+        br = chart.bench_ret_series(bench, f.index).values
         hist = []
         for k in range(0, 10):
             tk = t - k
@@ -253,8 +254,8 @@ def analyse(t: str, df: pd.DataFrame, bench: pd.DataFrame | None) -> dict:
                     or sk["lo_idx"] != st["lo_idx"] or abs(sk["zone_dist_pct"]) > 5
                     or not chart.trend_ok(sk, f.iloc[tk])):
                 break
-            hist.append(chart.predict(MODEL, chart.features(f, tk, sk, bs[tk])))
-        row["p_win"] = chart.predict(MODEL, chart.features(f, t, st, bside))
+            hist.append(chart.predict(MODEL, chart.features(f, tk, sk, bs[tk], br[tk])))
+        row["p_win"] = hist[0] if hist else chart.predict(MODEL, chart.features(f, t, st, bs[t], br[t]))
         row["days_valid"] = len(hist)
         row["p_avg3"] = float(np.mean(hist[:3])) if hist else row["p_win"]
         row["p_std"] = float(np.std(hist[:5])) if len(hist) > 1 else np.nan
