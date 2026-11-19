@@ -116,13 +116,15 @@ def render(report: dict, out: str) -> None:
                                     fc=BLUE, ec="none"))
         crv = p.get("crv")
         crv_s = f"{float(crv):.1f}".replace(".", ",") if crv is not None else "–"
-        ax.text(cx, cy - 0.22, f"CRV {crv_s} · {p.get('weeks', '')}", fontsize=8.2, color=MUTED, va="center")
+        ax.text(cx, cy - 0.22, f"CRV bis T2 {crv_s} · T1 {p.get('weeks', '')}", fontsize=8.2, color=MUTED, va="center")
         ax.text(cx, cy - 0.41, str(p.get("instrument", "")), fontsize=8.2, color=MUTED, va="center")
 
         # Zonen-Leiste
         lx0, lx1 = 6.6, 10.05
         px, st, zl, zh, t1 = (float(p[k]) for k in ("close", "stop", "zone_lo", "zone_hi", "t1"))
-        lo, hi = min(st, zl, px, t1), max(st, zh, px, t1)
+        t2 = float(p["t2"]) if p.get("t2") is not None else None
+        pts = [st, zl, zh, px, t1] + ([t2] if t2 is not None else [])
+        lo, hi = min(pts), max(pts)
         pad = (hi - lo) * 0.07 or 1
         X = lambda v: lx0 + (v - lo + pad) / (hi - lo + 2 * pad) * (lx1 - lx0)  # noqa: E731
         ly = cy + 0.22
@@ -130,12 +132,17 @@ def render(report: dict, out: str) -> None:
         ax.add_patch(plt.Rectangle((X(zl), ly - 0.07), X(zh) - X(zl), 0.14, color=BLUE, alpha=0.35, lw=0))
         ax.plot([X(st)] * 2, [ly - 0.12, ly + 0.12], color=RED, lw=2.2)
         ax.plot([X(t1)] * 2, [ly - 0.12, ly + 0.12], color=GOLD, lw=2.2)
+        if t2 is not None:
+            ax.plot([X(t2)] * 2, [ly - 0.09, ly + 0.09], color=GOLD, lw=1.4, alpha=0.55)
         ax.plot(X(px), ly, "o", ms=7.5, color="#3d3c39", mec=CARD, mew=1.6, zorder=5)
         ref = px if zl <= px <= zh else (zl + zh) / 2
         d_st = (st / ref - 1) * 100
         d_t1 = (t1 / ref - 1) * 100
         ax.text(X(st), ly - 0.27, f"Stop {pct(d_st)}", fontsize=7.6, color=RED, ha="center", va="center")
         ax.text(X(t1), ly - 0.27, f"T1 {pct(d_t1)}", fontsize=7.6, color=GOLD, ha="center", va="center")
+        if t2 is not None:
+            ax.text(X(t2), ly + 0.24, f"T2 {pct((t2 / ref - 1) * 100)}", fontsize=7.2, color=GOLD, alpha=0.8,
+                    ha="center", va="center")
         ax.text(lx0, cy - 0.3, f"Kurs {money(px, cur)} · Zone {money(zl, cur)}–{money(zh, cur)}", fontsize=8,
                 color=INK, va="center")
         if p.get("ema_text"):
@@ -149,10 +156,10 @@ def render(report: dict, out: str) -> None:
             ax.text(0.3, y - 0.22 * (k + 1), f"– {r.get('name') or r.get('ticker')}: {r.get('reason', '')}",
                     fontsize=8, color=MUTED, va="center")
     # Legende
-    ax.text(0.3, 0.26, "Wahrscheinlichkeit = Anteil vergleichbarer Setups im Backtest, die Ziel 1 vor dem Stop erreicht haben. "
-            "Confidence = wie belastbar diese Zahl ist (Fallzahl, Tage stabil, EMA-Bild, Termine, News).",
+    ax.text(0.3, 0.26, "Wahrscheinlichkeit = Trefferquote vergleichbarer Setups im Backtest (Ziel 1 vor Stop). "
+            "Confidence = Belastbarkeit (Fallzahl, Tage stabil, EMA-Bild, Termine, News).",
             fontsize=7.4, color=MUTED, va="center")
-    ax.text(0.3, 0.1, "Leiste: blau = Einstiegszone · rot = Stop · gold = Ziel 1 · Punkt = aktueller Kurs. "
+    ax.text(0.3, 0.1, "Leiste: blau = Einstiegszone · rot = Stop · gold = Ziel 1 (1 R) · hellgold = Ziel 2 (altes Hoch/Tief) · Punkt = Kurs. "
             "Prozent ab Einstieg (Kurs in der Zone, sonst Zonenmitte). Keine Anlageberatung.",
             fontsize=7.4, color=MUTED, va="center")
     fig.savefig(out, facecolor=BG)

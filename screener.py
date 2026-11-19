@@ -224,8 +224,12 @@ def analyse(t: str, df: pd.DataFrame, bench: pd.DataFrame | None) -> dict:
         return row
     longs = st["setup"] == "long"
     H, L = st["swing_high"], st["swing_low"]
+    # Ziel 1 = 1 R (so weit wie der Stop, Backtest: ca. 55 % Treffer), Ziel 2 = Swing-Extrem (ca. 22 %)
+    risk_abs = abs(st["entry"] - st["stop"])
+    t1_1r = st["entry"] + risk_abs if longs else st["entry"] - risk_abs
     row.update({"setup": st["setup"], "zone_lo": st["zone_lo"], "zone_hi": st["zone_hi"], "stop": st["stop"],
-                "t1": st["t1"], "t2": st["t2"], "crv": st["crv_entry"], "zone_dist_pct": st["zone_dist_pct"],
+                "t1": t1_1r, "t2": st["t1"], "t3": st["t2"], "crv": st["crv_entry"],
+                "zone_dist_pct": st["zone_dist_pct"],
                 "fib382": (H - 0.382 * (H - L)) if longs else (L + 0.382 * (H - L)),
                 "swing_high": H, "swing_low": L,
                 "swing_high_date": f.index[st["hi_idx"]].strftime("%Y-%m-%d"),
@@ -453,7 +457,7 @@ def run(refresh_fund: bool) -> None:
         .sort_values("gap_below_dist_pct", ascending=False)
 
     cols = ["ticker", "name", "isin", "wkn", "currency", "region", "indices", "sector", "date", "close", "grade", "score", "setup", "status",
-            "zone_lo", "zone_hi", "stop", "t1", "t2", "crv", "candle", "rsi", "atr_pct", "sma200", "sma200_rising",
+            "zone_lo", "zone_hi", "stop", "t1", "t2", "t3", "crv", "candle", "rsi", "atr_pct", "sma200", "sma200_rising",
             "ema20", "ema50", "dist_hi52_pct", "rel_bench_pp", "vol_ratio", "momentum", "mom_label", "valuation",
             "val_label", "val_badge", "quality", "qual_label", "fwd_pe", "ev_ebitda", "gap_below_from",
             "gap_below_to", "gap_below_dist_pct", "gap_above_from", "gap_above_to", "gap_above_dist_pct",

@@ -78,7 +78,7 @@ def eligible(r: pd.Series) -> bool:
     d = _f(r.get("zone_dist_pct"))
     if not np.isfinite(d) or abs(d) > 5 or (r["setup"] == "long" and d < 0) or (r["setup"] == "short" and d > 0):
         return False
-    return (_f(r.get("crv_entry"), 0) >= 1.5 and _f(r.get("risk_pct"), 99) <= 10
+    return (_f(r.get("crv"), 0) >= 1.5 and _f(r.get("risk_pct"), 99) <= 10
             and np.isfinite(_f(r.get("p_avg3"))))
 
 
@@ -116,7 +116,8 @@ def select(res: pd.DataFrame, model: dict | None, state_file: str, asof: str) ->
     res = res.copy()
     res["key"] = res["ticker"] + "::" + res["setup_key"].fillna("")
     res["eligible"] = res.apply(eligible, axis=1)
-    res["ev_R"] = res["p_avg3"] * res["crv_entry"] - (1 - res["p_avg3"])
+    tr = float(model.get("target_R", 1.0))
+    res["ev_R"] = res["p_avg3"] * tr - (1 - res["p_avg3"])
     by_key = {k: r for k, r in res.set_index("key", drop=False).iterrows()}
     by_ticker = {r["ticker"]: r for _, r in res.iterrows()}
 
@@ -157,7 +158,7 @@ def select(res: pd.DataFrame, model: dict | None, state_file: str, asof: str) ->
         inzone = r["zone_dist_pct"] == 0
         pick = {k: (None if isinstance(v, float) and not math.isfinite(v) else v) for k, v in r.items()
                 if k in ("ticker", "name", "isin", "wkn", "currency", "sector", "setup", "close", "zone_lo",
-                         "zone_hi", "stop", "t1", "t2", "entry", "crv_entry", "risk_pct", "pot_t1_pct", "weeks_t1",
+                         "zone_hi", "stop", "t1", "t2", "entry", "crv", "crv_entry", "risk_pct", "pot_t1_pct", "weeks_t1",
                          "ko_level", "ko_leverage", "trend", "ema_text", "stack", "ema20", "ema50", "ema200",
                          "rsi", "atr_pct", "earnings_days", "status", "candle", "swing_high", "swing_low",
                          "swing_high_date", "swing_low_date", "gap_below_from", "gap_below_to", "gap_above_from",
@@ -166,6 +167,7 @@ def select(res: pd.DataFrame, model: dict | None, state_file: str, asof: str) ->
             "probability": round(float(r["p_avg3"]) * 100),
             "probability_today": round(float(r["p_win"]) * 100) if np.isfinite(_f(r["p_win"])) else None,
             "hist_hit": round(hist_hit(model, float(r["p_avg3"])) * 100),
+            "hit_t2_hist": round(float(model.get("hit_swing_target", np.nan)) * 100),
             "ev_R": round(float(r["ev_R"]), 2),
             "confidence_base": conf, "confidence_parts": parts,
             "category": "Einstieg jetzt" if inzone else "Limit setzen",

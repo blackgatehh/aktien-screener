@@ -1,6 +1,7 @@
 """Backtest der Fibonacci-Setups und Schätzung der Gewinnwahrscheinlichkeit (Framework v3).
 
-Frage: Wie oft erreicht ein Setup Ziel 1, bevor der Stop fällt?
+Frage: Wie oft erreicht ein Setup Ziel 1 (= 1 R, also so weit wie der Stop entfernt ist), bevor der Stop fällt?
+Ziel 2 bleibt das Swing-Extrem (altes Hoch bzw. Tief); dessen Trefferquote steht zusätzlich im Bericht.
 Für jeden Titel und jeden Handelstag der letzten Jahre wird das Setup genau so bestimmt wie im
 Live-Screener (chart.setup_at). Liegt der Kurs höchstens 5 % von der Zone entfernt, wird eine
 Limit-Order in der Zone simuliert (Kurs in der Zone: Einstieg zum Schlusskurs, sonst Zonenmitte,
@@ -30,6 +31,7 @@ from universe import INDEX_BENCHMARK, benchmark_for, load_universe
 
 DATA = os.path.join(os.path.dirname(__file__), "data")
 MAX_BARS, FILL_BARS, NEAR_PCT = 60, 10, 5.0
+TARGET_R = 1.0  # Ziel 1 = Einstieg ± 1 × Stop-Abstand (Backtest 19.11.2026: realistisches Ziel mit ~55–60 % Treffern)
 
 
 def simulate(f: pd.DataFrame, t: int, st: dict) -> dict | None:
@@ -175,45 +177,61 @@ def bin_table(d: pd.DataFrame, by: str, bins=None, labels=None) -> pd.DataFrame:
     return t
 
 
-def run(period: str, limit: int | None) -> None:
+def run(period: str, limit: int | None, refit: bool = False) -> None:
     os.makedirs(DATA, exist_ok=True)
-    uni = load_universe()
+    uni = load_universe(refresh=not refit)
     if limit:
         uni = uni.head(limit)
-    bench_syms = sorted(set(INDEX_BENCHMARK.values()))
-    prices = download(uni["ticker"].tolist() + bench_syms, period)
-    rows = []
-    t0 = time.time()
-    for k, (_, u) in enumerate(uni.iterrows()):
-        df = prices.get(u["ticker"])
-        if df is None:
-            continue
-        try:
-            rows += signals_for(u["ticker"], df, prices.get(benchmark_for(u["indices"])))
-        except Exception as exc:  # noqa: BLE001
-            print(f"[signale] {u['ticker']}: {exc}")
-        if k % 50 == 49:
-            print(f"[signale] {k + 1}/{len(uni)} · {len(rows)} Zeilen · {time.time() - t0:.0f}s")
-    allsig = pd.DataFrame(rows)
-    fill_rate = float(allsig["filled"].mean())
-    sig = allsig[allsig["filled"] == 1].dropna(subset=chart.FEATURES).copy()
-    sig.to_csv(os.path.join(DATA, "backtest_signals.csv.gz"), index=False, compression="gzip")
+    sig_file = os.path.join(DATA, "backtest_signals.csv.gz")
+    if refit:  # nur Modell neu schätzen, Signale aus dem letzten Lauf
+        sig = pd.read_csv(sig_file)
+        with open(os.path.join(DATA, "prob_model.json"), encoding="utf-8") as fh:
+            fill_rate = json.load(fh).get("fill_rate", np.nan)
+    else:
+        bench_syms = sorted(set(INDEX_BENCHMARK.values()))
+        prices = download(uni["ticker"].tolist() + bench_syms, period)
+        rows = []
+        t0 = time.time()
+        for k, (_, u) in enumerate(uni.iterrows()):
+            df = prices.get(u["ticker"])
+            if df is None:
+                continue
+            try:
+                rows += signals_for(u["ticker"], df, prices.get(benchmark_for(u["indices"])))
+            except Exception as exc:  # noqa: BLE001
+                print(f"[signale] {u['ticker']}: {exc}")
+            if k % 50 == 49:
+                print(f"[signale] {k + 1}/{len(uni)} · {len(rows)} Zeilen · {time.time() - t0:.0f}s")
+        allsig = pd.DataFrame(rows)
+        fill_rate = float(allsig["filled"].mean())
+        sig = allsig[allsig["filled"] == 1].dropna(subset=chart.FEATURES).copy()
+        sig.to_csv(sig_file, index=False, compression="gzip")
+    sig = sig.dropna(subset=chart.FEATURES).copy()
+    # Zielgröße: Ziel 1 (1 R) vor dem Stop. Ergebnis in R bei Ausstieg komplett an Ziel 1 bzw. Stop
+    sig["win_swing"] = sig["win"]
+    sig["R_swing"] = sig["R"]
+    sig["win"] = (sig["mfe_R"] >= TARGET_R).astype(int)
+    sig["R"] = np.where(sig["win"] == 1, TARGET_R, np.minimum(sig["R_swing"], 0).clip(lower=-1.5))
+    sig.loc[(sig["win"] == 0) & (sig["end"] != "stop"), "R"] = sig["R_swing"].clip(-1, TARGET_R)
 
     last = pd.to_datetime(sig["date"]).max()
     test_from = (last - pd.Timedelta(days=365)).strftime("%Y-%m-%d")
     model, te = fit(sig, test_from)
 
-    # Schwellen für den Top-10-Bericht aus den Testdaten (außerhalb der Trainingszeit):
-    # Einstieg ab der Wahrscheinlichkeit, ab der der Durchschnittsertrag ≥ +0,25 R ist und ≥ 150 Fälle bleiben.
+    # Schwellen für den Top-10-Bericht aus den Testdaten (außerhalb der Trainingszeit, nur mit Trendfilter):
+    # Aufnahme ab der Wahrscheinlichkeit, ab der die eingetretene Trefferquote ≥ 55 % ist (Ertrag ≥ +0,1 R
+    # bei Ziel 1 = 1 R) und mindestens 300 Signale übrig bleiben.
     te_tf = te[te["trend_aligned"] == 1]
     p_enter = 0.55
-    for th in np.arange(0.30, 0.80, 0.01):
+    for th in np.arange(0.45, 0.70, 0.005):
         sub = te_tf[te_tf["p"] >= th]
-        if len(sub) >= 150 and sub["R"].mean() >= 0.25:
-            p_enter = round(float(th), 2)
+        if len(sub) >= 300 and sub["win"].mean() >= 0.55:
+            p_enter = round(float(th), 3)
             break
     model["p_enter"] = p_enter
-    model["p_exit"] = round(max(0.25, p_enter - 0.08), 2)
+    model["p_exit"] = round(p_enter - 0.04, 3)
+    model["target_R"] = TARGET_R
+    model["hit_swing_target"] = float(sig["win_swing"].mean())
     model["fill_rate"] = fill_rate
     model["generated_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
     model["period"] = period
@@ -223,7 +241,7 @@ def run(period: str, limit: int | None) -> None:
     pall = 1 / (1 + np.exp(-(model["intercept"] + ((sig[chart.FEATURES] - model["mean"]) / model["std"]).values
                              @ np.array(model["coef"]))))
     sig["p"] = pall
-    edges = [0, .2, .3, .4, .5, .6, .7, 1]
+    edges = [0, .4, .45, .5, .55, .6, .65, 1]
     sup = sig.groupby(pd.cut(sig["p"], edges, include_lowest=True), observed=False).agg(
         n=("win", "size"), hit=("win", "mean"), R=("R", "mean"))
     model["support"] = {"edges": edges, "n": sup["n"].astype(int).tolist(),
@@ -233,12 +251,14 @@ def run(period: str, limit: int | None) -> None:
 
     # ---------------------------------------------------------- Bericht
     m = model["metrics_out_of_sample"]
-    rel = bin_table(te, "p", bins=[0, .2, .3, .4, .5, .6, .7, 1])
+    rel = bin_table(te, "p", bins=[0, .4, .45, .5, .55, .6, .65, 1])
     lines = [
         f"# Backtest Fibonacci-Setups · {model['generated_utc']} UTC",
         "",
         f"Zeitraum {period}, {len(uni)} Titel, {model['n_signals']:,} Signaltage aus {model['n_setups']:,} Setups. "
-        f"Limit-Ausführungsquote {fill_rate * 100:.0f} %. Gewinn = Ziel 1 vor Stop innerhalb von {MAX_BARS} Handelstagen.",
+        f"Limit-Ausführungsquote {fill_rate * 100:.0f} %. Gewinn = Ziel 1 (= {TARGET_R:g} R, Abstand wie der Stop) "
+        f"vor dem Stop innerhalb von {MAX_BARS} Handelstagen. Altes Ziel (Swing-Extrem) erreichen nur "
+        f"{model['hit_swing_target'] * 100:.1f} %.",
         "",
         f"**Basisquote:** {model['base_rate'] * 100:.1f} % aller ausgeführten Setups erreichen Ziel 1 vor dem Stop.",
         "",
@@ -278,5 +298,6 @@ def run(period: str, limit: int | None) -> None:
 
 
 if __name__ == "__main__":
-    lim = int(sys.argv[2]) if len(sys.argv) > 2 else None
-    run(sys.argv[1] if len(sys.argv) > 1 else "6y", lim)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    lim = int(args[1]) if len(args) > 1 else None
+    run(args[0] if args else "6y", lim, refit="--refit" in sys.argv)
