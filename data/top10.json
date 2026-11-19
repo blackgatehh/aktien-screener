@@ -688,7 +688,7 @@
   "brier": 0.24843711373750071,
   "base_rate_test": 0.496358634083185
  },
- "generated_utc": "2026-11-19 10:39",
+ "generated_utc": "2026-11-19 10:41",
  "market": {
   "USA": {
    "regime": "Neutral",
@@ -697,14 +697,14 @@
   },
   "Deutschland": {
    "regime": "Neutral",
-   "index": 25829.88,
-   "sma200": 24999.72
+   "index": 25830.97,
+   "sma200": 24999.73
   },
   "Europa": {
    "regime": "Neutral",
-   "index": 6194.63,
+   "index": 6195.92,
    "sma200": 6130.26
   },
-  "VIX": 22.08
+  "VIX": 22.06
  }
 }
