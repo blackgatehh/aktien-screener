@@ -235,7 +235,9 @@ def analyse(t: str, df: pd.DataFrame, bench: pd.DataFrame | None) -> dict:
                 "swing_high_date": f.index[st["hi_idx"]].strftime("%Y-%m-%d"),
                 "swing_low_date": f.index[st["lo_idx"]].strftime("%Y-%m-%d"),
                 "trend_ok": chart.trend_ok(st, fr), "retrace_pct": st["retrace"] * 100,
-                "setup_key": f"{st['setup']}|{f.index[st['hi_idx']].date()}|{f.index[st['lo_idx']].date()}"})
+                # Schlüssel = Richtung + Startpunkt der Bewegung (Long: Tief, Short: Hoch). Das Extrem am anderen
+                # Ende wandert in einem laufenden Trend mit; das Setup bleibt trotzdem dasselbe.
+                "setup_key": f"{st['setup']}|{f.index[st['lo_idx'] if longs else st['hi_idx']].date()}"})
     if st["broken"]:
         row["status"] = "Setup gebrochen"
     elif st["zone_dist_pct"] == 0:
@@ -254,8 +256,9 @@ def analyse(t: str, df: pd.DataFrame, bench: pd.DataFrame | None) -> dict:
         for k in range(0, 10):
             tk = t - k
             sk = st if k == 0 else chart.setup_at(f, tk)
-            if (sk is None or sk["broken"] or sk["setup"] != st["setup"] or sk["hi_idx"] != st["hi_idx"]
-                    or sk["lo_idx"] != st["lo_idx"] or abs(sk["zone_dist_pct"]) > 5
+            anchor = "lo_idx" if longs else "hi_idx"
+            if (sk is None or sk["broken"] or sk["setup"] != st["setup"] or sk[anchor] != st[anchor]
+                    or abs(sk["zone_dist_pct"]) > 5
                     or not chart.trend_ok(sk, f.iloc[tk])):
                 break
             hist.append(chart.predict(MODEL, chart.features(f, tk, sk, bs[tk], br[tk])))
