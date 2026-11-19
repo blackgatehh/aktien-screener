@@ -171,7 +171,7 @@ def research(period: str) -> None:
              "| Ziel vor Stop | Long | Short |", "|---|---|---|"]
     for p in TARGETS:
         lines.append(f"| {p} % | {d[f'up{p}'].mean() * 100:.1f} % | {d[f'dn{p}'].mean() * 100:.1f} % |")
-    models, meta = {}, {"features": FEATS, "horizon": H, "generated_utc": f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M}"}
+    models, models_tr, meta = {}, {}, {"features": FEATS, "horizon": H, "generated_utc": f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M}"}
     lines += ["", "## Modell außerhalb der Trainingszeit", "",
               "Top 10 = die 10 Aktien mit der höchsten vorhergesagten Wahrscheinlichkeit je Tag.", "",
               "| Richtung · Ziel | AUC | Top 10 je Tag | Top 3 je Tag | Basis | Faktor |", "|---|---|---|---|---|---|"]
@@ -190,6 +190,7 @@ def research(period: str) -> None:
         cal["bin"] = pd.qcut(cal["p"], 10, duplicates="drop")
         ct = cal.groupby("bin", observed=True).agg(vorhergesagt=("p", "mean"), eingetreten=(y, "mean"), n=(y, "size"))
         meta[f"{side}_calib"] = {"pred": ct["vorhergesagt"].round(4).tolist(), "obs": ct["eingetreten"].round(4).tolist()}
+        models_tr[side] = m
         meta[f"{side}_test"] = {"auc": auc, "top10": p10, "top3": p3, "base": base}
         tt = te.assign(p=p).sort_values("p", ascending=False)
         evc = "ev_long10" if side == "long" else "ev_short10"
@@ -225,6 +226,33 @@ def research(period: str) -> None:
         for q in TARGETS[1:]:
             mt = meta[f"{side}_test"]
             lines.append(f"| {side} {pre}{q} % | {mt[f'top10_{q}'] * 100:.1f} % | {mt[f'base_{q}'] * 100:.1f} % |")
+    # ---- Richtung statt nur Bewegung: Ranking nach Differenz und nach direkt geschätztem Ergebnis
+    from sklearn.ensemble import HistGradientBoostingRegressor
+    pl = models_tr["long"].predict_proba(te[FEATS])[:, 1]
+    ps = models_tr["short"].predict_proba(te[FEATS])[:, 1]
+    rows = []
+    for nm, score, evc, hit, opp in (("Long nach p(+10) − p(−10)", pl - ps, "ev_long10", "up10", "dn10"),
+                                     ("Short nach p(−10) − p(+10)", ps - pl, "ev_short10", "dn10", "up10")):
+        tt = te.assign(sc=score).sort_values("sc", ascending=False)
+        for k in (3, 10):
+            tk = tt.groupby("date").head(k)
+            rows.append((nm, k, tk[hit].mean(), tk[opp].mean(), tk[evc].mean()))
+    regs = {}
+    for side, evc, hit, opp in (("long", "ev_long10", "up10", "dn10"), ("short", "ev_short10", "dn10", "up10")):
+        r = HistGradientBoostingRegressor(max_iter=300, learning_rate=0.05, max_leaf_nodes=31, min_samples_leaf=800,
+                                          l2_regularization=1.0, random_state=7)
+        r.fit(tr[FEATS], tr[evc])
+        tt = te.assign(sc=r.predict(te[FEATS])).sort_values("sc", ascending=False)
+        for k in (3, 10):
+            tk = tt.groupby("date").head(k)
+            rows.append((f"{side} nach geschätztem Ergebnis", k, tk[hit].mean(), tk[opp].mean(), tk[evc].mean()))
+        regs[side] = r
+        meta[f"{side}_ev_corr"] = float(np.corrcoef(tt["sc"], tt[evc])[0, 1])
+    lines += ["", "## Richtung: Ranking-Varianten (Test)", "",
+              "| Ranking | Top k | Ziel ±10 % zuerst | Gegenrichtung zuerst | Ø Ergebnis je Trade |", "|---|---|---|---|---|"]
+    for nm, k, a, b, e in rows:
+        lines.append(f"| {nm} | {k} | {a * 100:.1f} % | {b * 100:.1f} % | {e:+.2f} % |")
+    meta["direction_rows"] = [list(map(lambda v: v if isinstance(v, str) else float(v), r)) for r in rows]
     lines += ["", "## Ergebnis pro Trade (Test): Ausstieg bei ±10 %-Ziel, Stop oder nach 30 Tagen", "",
               "| | Ø Ergebnis Top 3 | Ø Ergebnis Top 10 | Ø alle | Ø Stop | Gegenrichtung −10 % zuerst (Top 10) |",
               "|---|---|---|---|---|---|"]
