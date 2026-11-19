@@ -84,6 +84,9 @@ def labels(df: pd.DataFrame, atr_pct: np.ndarray) -> dict[str, np.ndarray]:
     out = {f"up{p}": np.full(n, np.nan) for p in TARGETS}
     out.update({f"dn{p}": np.full(n, np.nan) for p in TARGETS})
     out["maxup"], out["maxdn"] = np.full(n, np.nan), np.full(n, np.nan)
+    c = df["Close"].values.astype(float)
+    for k in ("stop_pct", "ret30", "ev_long10", "ev_short10"):
+        out[k] = np.full(n, np.nan)
     for t in range(n - H - 1):
         e = o[t + 1]
         if not np.isfinite(e) or e <= 0 or not np.isfinite(atr_pct[t]):
@@ -102,6 +105,14 @@ def labels(df: pd.DataFrame, atr_pct: np.ndarray) -> dict[str, np.ndarray]:
             out[f"dn{p}"][t] = float(i < H and i < stop_s)
         out["maxup"][t] = (hh.max() / e - 1) * 100
         out["maxdn"][t] = (1 - ll.min() / e) * 100
+        out["stop_pct"][t] = s * 100
+        r30 = (c[t + H] / e - 1) * 100
+        out["ret30"][t] = r30
+        # Ergebnis in % bei Ausstieg an Ziel (10 %), Stop oder nach 30 Tagen
+        iu = np.argmax(hh >= e * 1.10) if (hh >= e * 1.10).any() else H
+        out["ev_long10"][t] = 10.0 if iu < stop_l else (-s * 100 if stop_l < H else r30)
+        idn = np.argmax(ll <= e * 0.90) if (ll <= e * 0.90).any() else H
+        out["ev_short10"][t] = 10.0 if idn < stop_s else (-s * 100 if stop_s < H else -r30)
     return out
 
 
@@ -180,6 +191,18 @@ def research(period: str) -> None:
         ct = cal.groupby("bin", observed=True).agg(vorhergesagt=("p", "mean"), eingetreten=(y, "mean"), n=(y, "size"))
         meta[f"{side}_calib"] = {"pred": ct["vorhergesagt"].round(4).tolist(), "obs": ct["eingetreten"].round(4).tolist()}
         meta[f"{side}_test"] = {"auc": auc, "top10": p10, "top3": p3, "base": base}
+        tt = te.assign(p=p).sort_values("p", ascending=False)
+        evc = "ev_long10" if side == "long" else "ev_short10"
+        opp = "dn10" if side == "long" else "up10"
+        for k in (3, 10):
+            tk = tt.groupby("date").head(k)
+            meta[f"{side}_test"][f"ev_top{k}"] = float(tk[evc].mean())
+            meta[f"{side}_test"][f"stop_top{k}"] = float(tk["stop_pct"].mean())
+            meta[f"{side}_test"][f"opp_top{k}"] = float(tk[opp].mean())
+        meta[f"{side}_test"]["ev_all"] = float(te[evc].mean())
+        # Schwellen: typische Wahrscheinlichkeit des 5./10./20.-besten Titels eines Tages
+        kth = te[["date"]].assign(p=p).sort_values("p", ascending=False).groupby("date")["p"]
+        meta[f"{side}_thr"] = {k: float(kth.nth(k - 1).median()) for k in (3, 5, 10, 20)}
         # Andere Ziele mit demselben Ranking
         for q in TARGETS[1:]:
             yy = f"{y[:2]}{q}"
@@ -202,6 +225,13 @@ def research(period: str) -> None:
         for q in TARGETS[1:]:
             mt = meta[f"{side}_test"]
             lines.append(f"| {side} {pre}{q} % | {mt[f'top10_{q}'] * 100:.1f} % | {mt[f'base_{q}'] * 100:.1f} % |")
+    lines += ["", "## Ergebnis pro Trade (Test): Ausstieg bei ±10 %-Ziel, Stop oder nach 30 Tagen", "",
+              "| | Ø Ergebnis Top 3 | Ø Ergebnis Top 10 | Ø alle | Ø Stop | Gegenrichtung −10 % zuerst (Top 10) |",
+              "|---|---|---|---|---|---|"]
+    for side in ("long", "short"):
+        mt = meta[f"{side}_test"]
+        lines.append(f"| {side} | {mt['ev_top3']:+.2f} % | {mt['ev_top10']:+.2f} % | {mt['ev_all']:+.2f} % | "
+                     f"{mt['stop_top10']:.1f} % | {mt['opp_top10'] * 100:.1f} % |")
     lines += ["", "Hinweis: heutiges Index-Universum (Survivorship Bias), keine Kosten. Ziel und Stop am selben Tag zählen als Stop."]
     with open(os.path.join(DATA, "bigmove_model.pkl"), "wb") as fh:
         pickle.dump(models, fh)
