@@ -13,6 +13,7 @@ Optional auf oberster Ebene: base_rate (%), removed: [{name, reason}]
 from __future__ import annotations
 
 import json
+import re
 import sys
 
 import matplotlib
@@ -87,6 +88,8 @@ def render(report: dict, out: str) -> None:
 
         # Name, Kennung, Chips
         name = p.get("name") or p.get("ticker")
+        if len(name) > 30:
+            name = re.sub(r",?\s+(Inc|Incorporated|Corporation|Corp|Company|Co|plc|SE|AG|N\.V|S\.A)\.?$", "", name)
         if len(name) > 30:
             name = name[:29] + "…"
         ax.text(0.85, cy + 0.33, name, fontsize=11, fontweight="bold", color=INK, va="center")
