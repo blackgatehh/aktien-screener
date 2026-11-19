@@ -167,7 +167,7 @@ def select(res: pd.DataFrame, model: dict | None, state_file: str, asof: str) ->
             "probability": round(float(r["p_avg3"]) * 100),
             "probability_today": round(float(r["p_win"]) * 100) if np.isfinite(_f(r["p_win"])) else None,
             "hist_hit": round(hist_hit(model, float(r["p_avg3"])) * 100),
-            "hit_t2_hist": round(float(model.get("hit_swing_target", np.nan)) * 100),
+            "hit_t2_hist": round(float(model.get("hit_swing_target") or 0) * 100),
             "ev_R": round(float(r["ev_R"]), 2),
             "confidence_base": conf, "confidence_parts": parts,
             "category": "Einstieg jetzt" if inzone else "Limit setzen",
