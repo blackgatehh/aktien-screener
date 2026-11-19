@@ -184,9 +184,25 @@ def select(res: pd.DataFrame, model: dict | None, state_file: str, asof: str) ->
                    "thresholds": {"p_enter": p_in, "p_exit": p_out}}, fh, ensure_ascii=False, indent=1)
     watch = res[res["eligible"] & ~res["key"].isin(chosen) & (res["p_avg3"] >= p_in - 0.05)] \
         .sort_values("ev_R", ascending=False).head(10)
+    # v3.1: Kandidaten für die News-Prüfung. Chart-Setup sauber (Trendfilter, Zone, Stop), Wahrscheinlichkeit aus
+    # dem Chart allein unter der Schwelle, aber ≥ 42 %. Der Bericht prüft Nachrichten/Fundamentales und darf einen
+    # Titel als "News-gestützt" aufnehmen, wenn ≥ 2 konkrete Belege in Tradingrichtung vorliegen.
+    base = res[res["eligible"] & ~res["key"].isin(chosen) & (res["p_avg3"] >= 0.42) & (res["days_valid"] >= 1)]
+    news_c = pd.concat([base[base["setup"] == "short"].sort_values("p_avg3", ascending=False).head(5),
+                        base[base["setup"] == "long"].sort_values("p_avg3", ascending=False).head(5)])
+    news_candidates = []
+    for _, r in news_c.iterrows():
+        conf, parts = confidence(r, model)
+        news_candidates.append({k: (None if isinstance(v, float) and not math.isfinite(v) else v) for k, v in r.items()
+                                if k in ("ticker", "name", "isin", "wkn", "currency", "sector", "setup", "close",
+                                         "zone_lo", "zone_hi", "stop", "t1", "t2", "crv", "risk_pct", "trend",
+                                         "ema_text", "earnings_days", "status", "days_valid", "ko_level",
+                                         "ko_leverage", "weeks_t1", "ema20", "ema50", "ema200")}
+                               | {"probability_chart": round(float(r["p_avg3"]) * 100), "confidence_base": conf})
     return {"asof": asof, "thresholds": {"p_enter": p_in, "p_exit": p_out}, "picks": picks, "removed": removed,
             "watch_next": [{"ticker": r["ticker"], "name": r.get("name"), "setup": r["setup"],
                             "probability": round(float(r["p_avg3"]) * 100), "days_valid": int(r["days_valid"])}
                            for _, r in watch.iterrows()],
+            "news_candidates": news_candidates,
             "base_rate": round(float(model.get("base_rate", np.nan)) * 100, 1),
             "model_metrics": model.get("metrics_out_of_sample")}
