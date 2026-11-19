@@ -1,0 +1,38 @@
+{
+ "asof": "2026-11-13",
+ "thresholds": {
+  "p_enter": 0.05,
+  "p_exit": 0.02
+ },
+ "picks": [],
+ "removed": [],
+ "watch_next": [],
+ "base_rate": 9.0,
+ "model_metrics": {
+  "n_train": 231,
+  "n_test": 123,
+  "test_from": "2026-06-01",
+  "auc": 0.4542372881355932,
+  "brier": 0.06186741711372687,
+  "base_rate_test": 0.04065040650406504
+ },
+ "generated_utc": "2026-11-19 10:19",
+ "market": {
+  "USA": {
+   "regime": "Risk-on",
+   "index": 5009.85,
+   "sma200": 4812.15
+  },
+  "Deutschland": {
+   "regime": "Risk-on",
+   "index": 5009.85,
+   "sma200": 4812.15
+  },
+  "Europa": {
+   "regime": "Risk-on",
+   "index": 5009.85,
+   "sma200": 4812.15
+  },
+  "VIX": 16.52
+ }
+}

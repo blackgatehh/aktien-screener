@@ -24,12 +24,21 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-from indicators import atr, candle, ema, lin, open_gaps, rsi, swing
+import chart
+import selection
+from indicators import atr, candle, ema, lin, open_gaps, rsi
 from universe import INDEX_BENCHMARK, benchmark_for, load_universe
 
 DATA = os.path.join(os.path.dirname(__file__), "data")
 FUND_FILE = os.path.join(DATA, "fundamentals.csv")
-VERSION = "screener-v1 / framework v2.0"
+VERSION = "screener-v3 / framework v3.0"
+MODEL_FILE = os.path.join(DATA, "prob_model.json")
+STATE_FILE = os.path.join(DATA, "top10_state.json")
+try:
+    with open(MODEL_FILE, encoding="utf-8") as _fh:
+        MODEL = json.load(_fh)
+except FileNotFoundError:
+    MODEL = None
 
 
 # ----------------------------------------------------------------- Daten laden
@@ -199,47 +208,58 @@ def analyse(t: str, df: pd.DataFrame, bench: pd.DataFrame | None) -> dict:
         "gap_above_dist_pct": (ga["from"] / last - 1) * 100 if ga else np.nan,
     })
 
-    # Fibonacci-Zonen und Setup
-    sw = swing(df)
+    # Chartanalyse v3: EMA 5/13/20/50/200, Kreuzungen, Fibonacci-Setup, Wahrscheinlichkeit
+    f = chart.chart_frame(df)
+    t = len(f) - 1
+    fr = f.iloc[t]
+    bside = float(chart.bench_side_series(bench, f.index).iloc[-1])
+    row.update({"ema200": float(fr["ema200"]), "stack": float(fr["stack"]), "slope200": float(fr["slope200"]),
+                "x5_13": fr["x5_13"], "x20_50": fr["x20_50"], "x50_200": fr["x50_200"],
+                "d200_atr": float(fr["d200_atr"]), "trend": chart.trend_class(fr), "ema_text": chart.ema_text(fr)})
     row.update({"setup": "", "zone_lo": np.nan, "zone_hi": np.nan, "stop": np.nan, "t1": np.nan,
-                "t2": np.nan, "crv": np.nan, "status": "Beobachtung", "zone_dist_pct": np.nan})
-    if sw and (sw["high"] - sw["low"]) >= 4 * a:
-        H, L = sw["high"], sw["low"]
-        rng = H - L
-        row.update({"swing_high": H, "swing_high_date": sw["high_date"], "swing_low": L,
-                    "swing_low_date": sw["low_date"]})
-        if sw["direction"] == "up":  # Long: Rücksetzer in einer Aufwärtsbewegung
-            zlo, zhi = H - 0.618 * rng, H - 0.5 * rng
-            stop, t1, t2 = zlo - a, H, L + 1.272 * rng
-            entry = (zlo + zhi) / 2
-            crv = (t1 - entry) / (entry - stop) if entry > stop else np.nan
-            row.update({"setup": "long", "zone_lo": zlo, "zone_hi": zhi, "stop": stop, "t1": t1, "t2": t2,
-                        "crv": crv, "fib382": H - 0.382 * rng})
-            if zlo <= last <= zhi:
-                row["status"], row["zone_dist_pct"] = "In der Kaufzone", 0.0
-            elif last > zhi:
-                row["status"] = f"{(last / zhi - 1) * 100:.1f} % über Kaufzone"
-                row["zone_dist_pct"] = (last / zhi - 1) * 100
-            elif last > stop:
-                row["status"], row["zone_dist_pct"] = "unter Kaufzone, über Stop", (last / zlo - 1) * 100
-            else:
-                row["status"] = "Setup gebrochen"
-        else:  # Short: Gegenbewegung in einer Abwärtsbewegung
-            zlo, zhi = L + 0.5 * rng, L + 0.618 * rng
-            stop, t1, t2 = zhi + a, L, H - 1.272 * rng
-            entry = (zlo + zhi) / 2
-            crv = (entry - t1) / (stop - entry) if stop > entry else np.nan
-            row.update({"setup": "short", "zone_lo": zlo, "zone_hi": zhi, "stop": stop, "t1": t1, "t2": t2,
-                        "crv": crv, "fib382": L + 0.382 * rng})
-            if zlo <= last <= zhi:
-                row["status"], row["zone_dist_pct"] = "In der Short-Zone", 0.0
-            elif last < zlo:
-                row["status"] = f"{(1 - last / zlo) * 100:.1f} % unter Short-Zone"
-                row["zone_dist_pct"] = (last / zlo - 1) * 100
-            elif last < stop:
-                row["status"], row["zone_dist_pct"] = "über Short-Zone, unter Stop", (last / zhi - 1) * 100
-            else:
-                row["status"] = "Setup gebrochen"
+                "t2": np.nan, "crv": np.nan, "status": "Beobachtung", "zone_dist_pct": np.nan,
+                "p_win": np.nan, "p_avg3": np.nan, "days_valid": 0, "trend_ok": False, "setup_key": ""})
+    st = chart.setup_at(f, t)
+    if st is None:
+        return row
+    longs = st["setup"] == "long"
+    H, L = st["swing_high"], st["swing_low"]
+    row.update({"setup": st["setup"], "zone_lo": st["zone_lo"], "zone_hi": st["zone_hi"], "stop": st["stop"],
+                "t1": st["t1"], "t2": st["t2"], "crv": st["crv_entry"], "zone_dist_pct": st["zone_dist_pct"],
+                "fib382": (H - 0.382 * (H - L)) if longs else (L + 0.382 * (H - L)),
+                "swing_high": H, "swing_low": L,
+                "swing_high_date": f.index[st["hi_idx"]].strftime("%Y-%m-%d"),
+                "swing_low_date": f.index[st["lo_idx"]].strftime("%Y-%m-%d"),
+                "trend_ok": chart.trend_ok(st, fr), "retrace_pct": st["retrace"] * 100,
+                "setup_key": f"{st['setup']}|{f.index[st['hi_idx']].date()}|{f.index[st['lo_idx']].date()}"})
+    if st["broken"]:
+        row["status"] = "Setup gebrochen"
+    elif st["zone_dist_pct"] == 0:
+        row["status"] = "In der Kaufzone" if longs else "In der Short-Zone"
+    elif longs:
+        row["status"] = (f"{st['zone_dist_pct']:.1f} % über Kaufzone" if st["zone_dist_pct"] > 0
+                         else "unter Kaufzone, über Stop")
+    else:
+        row["status"] = (f"{-st['zone_dist_pct']:.1f} % unter Short-Zone" if st["zone_dist_pct"] < 0
+                         else "über Short-Zone, unter Stop")
+    # Wahrscheinlichkeit heute und Beständigkeit: dasselbe Setup (gleicher Swing) an den Vortagen
+    if MODEL and not st["broken"]:
+        bs = chart.bench_side_series(bench, f.index).values
+        hist = []
+        for k in range(0, 10):
+            tk = t - k
+            sk = st if k == 0 else chart.setup_at(f, tk)
+            if (sk is None or sk["broken"] or sk["setup"] != st["setup"] or sk["hi_idx"] != st["hi_idx"]
+                    or sk["lo_idx"] != st["lo_idx"] or abs(sk["zone_dist_pct"]) > 5
+                    or not chart.trend_ok(sk, f.iloc[tk])):
+                break
+            hist.append(chart.predict(MODEL, chart.features(f, tk, sk, bs[tk])))
+        row["p_win"] = chart.predict(MODEL, chart.features(f, t, st, bside))
+        row["days_valid"] = len(hist)
+        row["p_avg3"] = float(np.mean(hist[:3])) if hist else row["p_win"]
+        row["p_std"] = float(np.std(hist[:5])) if len(hist) > 1 else np.nan
+        cnd = chart.candle_at(f, t)
+        row["candle"] = cnd
     return row
 
 
@@ -250,13 +270,12 @@ def setup_score(r: pd.Series, regime: str) -> float:
     longs = r["setup"] == "long"
     last, zlo, zhi = r["close"], r["zone_lo"], r["zone_hi"]
     pts = 0.0
-    # 1) Trend (25)
-    above = last > r["sma200"]
-    rising = r["sma200_rising"]
-    if longs:
-        pts += 25 if above and rising else 15 if above else 8 if rising else 0
-    else:
-        pts += 25 if not above and not rising else 15 if not above else 8 if not rising else 0
+    # 1) Trend (25): EMA 50/200-Trend in Tradingrichtung, dazu der EMA-Fächer 5/13/20/50/200
+    s = 1 if longs else -1
+    tc = r.get("trend", "seitwärts")
+    aligned = (tc == "auf" and longs) or (tc == "ab" and not longs)
+    against = (tc == "ab" and longs) or (tc == "auf" and not longs)
+    pts += (17 if aligned else 0 if against else 5) + max(0.0, s * r.get("stack", 0) / 4) * 8
     # 2) Lage zur Zone (25)
     d = r["zone_dist_pct"]
     if d == 0:
@@ -415,6 +434,15 @@ def run(refresh_fund: bool) -> None:
     res["report_candidate"] = (res["grade"].isin(["A", "B"]) & (res["crv_entry"] >= 2) & (res["risk_pct"] <= 10)
                                & (res["zone_dist_pct"].abs() <= 5) & (res["status"] != "Setup gebrochen"))
 
+    # Top 10 mit Gedächtnis (Framework v3)
+    asof = str(res["date"].max())
+    top10 = selection.select(res, MODEL, STATE_FILE, asof)
+    top10["generated_utc"] = now.strftime("%Y-%m-%d %H:%M")
+    top10["market"] = regime
+    with open(os.path.join(DATA, "top10.json"), "w", encoding="utf-8") as fh:
+        json.dump(top10, fh, ensure_ascii=False, indent=1, default=str)
+    print(f"[top10] {len(top10['picks'])} Titel · raus: {len(top10['removed'])} · Schwellen {top10.get('thresholds')}")
+
     # Kandidatenlisten
     longs = res[(res["setup"] == "long") & res["grade"].isin(["A", "B", "C"])].sort_values("score", ascending=False)
     shorts = res[(res["setup"] == "short") & res["grade"].isin(["A", "B", "C"])].sort_values("score", ascending=False)
@@ -430,7 +458,8 @@ def run(refresh_fund: bool) -> None:
             "gap_below_to", "gap_below_dist_pct", "gap_above_from", "gap_above_to", "gap_above_dist_pct",
             "swing_high", "swing_high_date", "swing_low", "swing_low_date", "earnings_days", "earnings_soon",
             "target_mean", "entry", "pot_t1_pct", "risk_pct", "crv_entry", "weeks_t1", "ko_level", "ko_leverage",
-            "report_candidate"]
+            "report_candidate", "ema200", "stack", "trend", "trend_ok", "ema_text", "x5_13", "x20_50", "x50_200",
+            "p_win", "p_avg3", "days_valid", "setup_key", "retrace_pct"]
     cols = [c for c in cols if c in res.columns]
 
     def records(df: pd.DataFrame, n: int) -> list[dict]:
@@ -456,7 +485,8 @@ def run(refresh_fund: bool) -> None:
 
     # Chartdaten für die Top-Kandidaten
     charts = {}
-    chart_tickers = pd.concat([longs.head(12), shorts.head(8), breakouts.head(5)])["ticker"].unique()
+    chart_tickers = list(dict.fromkeys([p["ticker"] for p in top10["picks"]] +
+                                       pd.concat([longs.head(12), shorts.head(8), breakouts.head(5)])["ticker"].tolist()))
     for t in chart_tickers:
         df = prices[t].tail(180)
         c = prices[t]["Close"]
@@ -464,7 +494,9 @@ def run(refresh_fund: bool) -> None:
             "d": [x.strftime("%Y-%m-%d") for x in df.index],
             "o": df["Open"].round(3).tolist(), "h": df["High"].round(3).tolist(),
             "l": df["Low"].round(3).tolist(), "c": df["Close"].round(3).tolist(),
+            "ema5": ema(c, 5).tail(180).round(3).tolist(), "ema13": ema(c, 13).tail(180).round(3).tolist(),
             "ema20": ema(c, 20).tail(180).round(3).tolist(), "ema50": ema(c, 50).tail(180).round(3).tolist(),
+            "ema200": ema(c, 200).tail(180).round(3).tolist(),
             "sma200": c.rolling(200).mean().tail(180).round(3).tolist(),
         }
     with open(os.path.join(DATA, "charts_latest.json"), "w", encoding="utf-8") as fh:
