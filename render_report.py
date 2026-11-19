@@ -3,9 +3,12 @@
 Aufruf:  python render_report.py [data/claude_report.json] [data/report_latest.png]
 
 Erwartet in claude_report.json je Eintrag in "picks":
-  rank, ticker, name, isin, wkn (optional), setup ("long"/"short"), category, confidence,
+  rank, ticker, name, isin, wkn (optional), setup ("long"/"short"), category,
+  probability (0–100, Gewinnwahrscheinlichkeit T1 vor Stop), confidence (0–100, Belastbarkeit),
+  status_report ("neu"/"bleibt"), in_report_since (YYYY-MM-DD), ema_text, trend,
   close, currency, zone_lo, zone_hi, stop, t1, t2 (optional), crv, weeks (Text), instrument,
   comment, risks
+Optional auf oberster Ebene: base_rate (%), removed: [{name, reason}]
 """
 from __future__ import annotations
 
@@ -51,9 +54,11 @@ def chip(ax, x, y, text, bg, fg, size=8.5):
 def render(report: dict, out: str) -> None:
     picks = sorted(report.get("picks", []), key=lambda p: p.get("rank", 99))[:10]
     n = len(picks)
-    row_h = 1.18
+    row_h = 1.3
     head = 1.35
-    H = head + n * row_h + 0.35
+    removed = report.get("removed") or []
+    foot = 0.5 + (0.22 * min(len(removed), 6) + 0.3 if removed else 0)
+    H = head + n * row_h + foot
     fig = plt.figure(figsize=(10.5, H), dpi=150)
     ax = fig.add_axes([0, 0, 1, 1])
     ax.set_xlim(0, 10.5)
@@ -64,7 +69,9 @@ def render(report: dict, out: str) -> None:
     # Kopf
     ax.text(0.3, H - 0.42, f"Top 10 Trade-Chancen · {report.get('date', '')}", fontsize=15, fontweight="bold", color=INK, va="center")
     ax.text(0.3, H - 0.82, report.get("market_line", ""), fontsize=9.5, color=MUTED, va="center")
-    ax.text(10.2, H - 0.42, "Confidence noch nicht kalibriert", fontsize=8, color=MUTED, va="center", ha="right")
+    br = report.get("base_rate")
+    ax.text(10.2, H - 0.42, f"Basisquote aller Setups {br:.0f} %".replace(".", ",") if br else "", fontsize=8,
+            color=MUTED, va="center", ha="right")
 
     for i, p in enumerate(picks):
         top = H - head - i * row_h
@@ -86,26 +93,34 @@ def render(report: dict, out: str) -> None:
         ident = " · ".join(x for x in [
             f"ISIN {p['isin']}" if p.get("isin") else "",
             f"WKN {p['wkn']}" if p.get("wkn") else "",
-            p.get("ticker", "")] if x)
+            p.get("ticker", ""),
+            (f"im Bericht seit {p['in_report_since'][8:10]}.{p['in_report_since'][5:7]}."
+             if p.get("status_report") == "bleibt" and p.get("in_report_since") else "neu im Bericht")] if x)
         ax.text(0.85, cy + 0.03, ident, fontsize=7.8, color=MUTED, va="center")
         chip(ax, 0.85, cy - 0.3, "Long" if longs else "Short", "#e3f2e8" if longs else "#fbe4e4",
              GREEN if longs else RED)
         bg, fg = CAT.get(p.get("category", ""), ("#ecebe6", "#52514e"))
         chip(ax, 1.62, cy - 0.3, p.get("category", ""), bg, fg)
 
-        # Confidence + Eckdaten
-        cx = 4.1
-        conf = float(p.get("confidence", 0))
-        ax.text(cx, cy + 0.33, f"Confidence {conf:.0f}", fontsize=9.5, color=INK, va="center", fontweight="bold")
-        ax.add_patch(FancyBboxPatch((cx, cy + 0.08), 1.7, 0.09, boxstyle="round,pad=0,rounding_size=0.04", fc=LINE, ec="none"))
-        ax.add_patch(FancyBboxPatch((cx, cy + 0.08), 1.7 * conf / 100, 0.09, boxstyle="round,pad=0,rounding_size=0.04",
+        # Wahrscheinlichkeit, Confidence, Eckdaten
+        cx = 4.3
+        prob = float(p.get("probability", 0) or 0)
+        conf = float(p.get("confidence", 0) or 0)
+        ax.text(cx, cy + 0.4, f"Wahrscheinlichkeit {prob:.0f} %", fontsize=9.5, color=INK, va="center", fontweight="bold")
+        ax.add_patch(FancyBboxPatch((cx, cy + 0.17), 1.9, 0.09, boxstyle="round,pad=0,rounding_size=0.04", fc=LINE, ec="none"))
+        ax.add_patch(FancyBboxPatch((cx, cy + 0.17), 1.9 * prob / 100, 0.09, boxstyle="round,pad=0,rounding_size=0.04",
+                                    fc=GREEN, ec="none"))
+        ax.text(cx, cy - 0.02, f"Confidence {conf:.0f}/100", fontsize=8.3, color=INK, va="center")
+        ax.add_patch(FancyBboxPatch((cx + 1.15, cy - 0.05), 0.75, 0.06, boxstyle="round,pad=0,rounding_size=0.03", fc=LINE, ec="none"))
+        ax.add_patch(FancyBboxPatch((cx + 1.15, cy - 0.05), 0.75 * conf / 100, 0.06, boxstyle="round,pad=0,rounding_size=0.03",
                                     fc=BLUE, ec="none"))
         crv = p.get("crv")
-        ax.text(cx, cy - 0.12, f"CRV {str(crv).replace('.', ',')} · {p.get('weeks', '')}", fontsize=8.5, color=MUTED, va="center")
-        ax.text(cx, cy - 0.35, str(p.get("instrument", "")), fontsize=8.5, color=MUTED, va="center")
+        crv_s = f"{float(crv):.1f}".replace(".", ",") if crv is not None else "–"
+        ax.text(cx, cy - 0.22, f"CRV {crv_s} · {p.get('weeks', '')}", fontsize=8.2, color=MUTED, va="center")
+        ax.text(cx, cy - 0.41, str(p.get("instrument", "")), fontsize=8.2, color=MUTED, va="center")
 
         # Zonen-Leiste
-        lx0, lx1 = 6.25, 10.0
+        lx0, lx1 = 6.6, 10.05
         px, st, zl, zh, t1 = (float(p[k]) for k in ("close", "stop", "zone_lo", "zone_hi", "t1"))
         lo, hi = min(st, zl, px, t1), max(st, zh, px, t1)
         pad = (hi - lo) * 0.07 or 1
@@ -121,13 +136,25 @@ def render(report: dict, out: str) -> None:
         d_t1 = (t1 / ref - 1) * 100
         ax.text(X(st), ly - 0.27, f"Stop {pct(d_st)}", fontsize=7.6, color=RED, ha="center", va="center")
         ax.text(X(t1), ly - 0.27, f"T1 {pct(d_t1)}", fontsize=7.6, color=GOLD, ha="center", va="center")
-        ax.text(lx0, cy - 0.37, f"Kurs {money(px, cur)} · Zone {money(zl, cur)}–{money(zh, cur)}", fontsize=8,
+        ax.text(lx0, cy - 0.3, f"Kurs {money(px, cur)} · Zone {money(zl, cur)}–{money(zh, cur)}", fontsize=8,
                 color=INK, va="center")
+        if p.get("ema_text"):
+            ax.text(lx0, cy - 0.47, f"EMA {p['ema_text']}"[:62], fontsize=7.2, color=MUTED, va="center")
 
+    # Raus seit dem letzten Bericht
+    y = 0.66 + 0.22 * min(len(removed), 6)
+    if removed:
+        ax.text(0.3, y, "Raus seit dem letzten Bericht:", fontsize=8.5, color=INK, va="center", fontweight="bold")
+        for k, r in enumerate(removed[:6]):
+            ax.text(0.3, y - 0.22 * (k + 1), f"– {r.get('name') or r.get('ticker')}: {r.get('reason', '')}",
+                    fontsize=8, color=MUTED, va="center")
     # Legende
-    ax.text(0.3, 0.18, "Leiste: blau = Einstiegszone · rot = Stop · gold = Ziel 1 · Punkt = aktueller Kurs. "
+    ax.text(0.3, 0.26, "Wahrscheinlichkeit = Anteil vergleichbarer Setups im Backtest, die Ziel 1 vor dem Stop erreicht haben. "
+            "Confidence = wie belastbar diese Zahl ist (Fallzahl, Tage stabil, EMA-Bild, Termine, News).",
+            fontsize=7.4, color=MUTED, va="center")
+    ax.text(0.3, 0.1, "Leiste: blau = Einstiegszone · rot = Stop · gold = Ziel 1 · Punkt = aktueller Kurs. "
             "Prozent ab Einstieg (Kurs in der Zone, sonst Zonenmitte). Keine Anlageberatung.",
-            fontsize=7.6, color=MUTED, va="center")
+            fontsize=7.4, color=MUTED, va="center")
     fig.savefig(out, facecolor=BG)
     plt.close(fig)
 
