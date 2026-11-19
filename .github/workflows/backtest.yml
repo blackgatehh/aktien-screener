@@ -34,7 +34,7 @@ jobs:
         run: |
           git config user.name "screener-bot"
           git config user.email "screener-bot@users.noreply.github.com"
-          git pull --rebase -q
           git add data/prob_model.json data/backtest_report.md data/backtest_signals.csv.gz
           git diff --cached --quiet || git commit -m "Backtest $(date -u +'%Y-%m-%d %H:%M') UTC"
+          git pull --rebase -q -X ours
           git push
