@@ -467,7 +467,7 @@ def run(refresh_fund: bool) -> None:
             "swing_high", "swing_high_date", "swing_low", "swing_low_date", "earnings_days", "earnings_soon",
             "target_mean", "entry", "pot_t1_pct", "risk_pct", "crv_entry", "weeks_t1", "ko_level", "ko_leverage",
             "report_candidate", "ema200", "stack", "trend", "trend_ok", "ema_text", "x5_13", "x20_50", "x50_200",
-            "p_win", "p_avg3", "days_valid", "setup_key", "retrace_pct"]
+            "p_win", "p_avg3", "days_valid", "setup_key", "retrace_pct", "zone_dist_pct"]
     cols = [c for c in cols if c in res.columns]
 
     def records(df: pd.DataFrame, n: int) -> list[dict]:

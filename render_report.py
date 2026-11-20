@@ -27,6 +27,7 @@ BLUE, RED, GOLD, GREEN = "#2a63d6", "#d03b3b", "#c9961a", "#1a8a4a"
 CAT = {  # Hintergrund, Schrift
     "Einstieg jetzt": ("#e3f2e8", "#1a6b3a"),
     "Limit setzen": ("#e6eefb", "#1f4fa8"),
+    "Zone fast erreicht": ("#e6eefb", "#1f4fa8"),
     "Beobachten": ("#fbf0dc", "#8a5a0b"),
     "Offene Position": ("#ecebe6", "#52514e"),
 }

@@ -17,7 +17,7 @@ import os
 import numpy as np
 import pandas as pd
 
-MAX_PICKS, MAX_PER_SECTOR, MIN_DAYS = 10, 3, 2
+MAX_PICKS, MAX_PER_SECTOR, MIN_DAYS = 10, 3, 1
 
 
 def _f(x, default=np.nan) -> float:
@@ -101,108 +101,136 @@ def exit_reason(r: pd.Series | None, key: str, p_exit: float) -> str:
     return "Kriterien nicht mehr erfüllt"
 
 
+ACT_MAX = 1.5      # Phase 3 Timing: Kurs in der Zone oder höchstens 1,5 % davor = handelbar
+ALARM_MAX = 5.0    # bis 5 % vor der Zone: Alarm setzen
+P_MIN = 0.50       # Long: Chart-Grundwahrscheinlichkeit mindestens Durchschnitt (Ziel 1 vor Stop)
+P_MIN_SHORT = 0.43 # Short: Chart allein hat im Backtest keinen Vorteil → Aufnahme nur mit ≥ 2 News-Faktoren im Bericht
+MAX_SHORTS = 4
+KEEP = ("ticker", "name", "isin", "wkn", "currency", "sector", "setup", "close", "zone_lo", "zone_hi", "stop", "t1",
+        "t2", "entry", "crv", "crv_entry", "risk_pct", "pot_t1_pct", "weeks_t1", "ko_level", "ko_leverage", "trend",
+        "ema_text", "stack", "ema20", "ema50", "ema200", "rsi", "atr_pct", "earnings_days", "status", "candle",
+        "swing_high", "swing_low", "swing_high_date", "swing_low_date", "gap_below_from", "gap_below_to",
+        "gap_above_from", "gap_above_to", "days_valid", "p_win", "zone_dist_pct")
+
+
+def chart_reasons(r: pd.Series) -> list[str]:
+    """Phase 2 (Chart-Teil): konkrete, prüfbare Chartgründe in Tradingrichtung."""
+    s = 1 if r["setup"] == "long" else -1
+    out = []
+    zl, zh = _f(r.get("zone_lo")) * 0.985, _f(r.get("zone_hi")) * 1.015
+    for n in (20, 50, 200):
+        e = _f(r.get(f"ema{n}"))
+        if np.isfinite(e) and zl <= e <= zh:
+            out.append(f"Zone trifft EMA {n} ({e:.2f})")
+    c, e20 = _f(r.get("close")), _f(r.get("ema20"))
+    if np.isfinite(e20) and (c - e20) * s < 0 and r.get("zone_dist_pct") == 0:
+        out.append("Rücksetzer " + ("unter" if s > 0 else "über") + " die EMA 20 bis in die Zone")
+    if r.get("candle") in ((("hammer", "bull_engulfing")) if s > 0 else ("shooting_star", "bear_engulfing")):
+        out.append("Umkehrkerze heute (" + str(r.get("candle")).replace("_", " ") + ")")
+    x = _f(r.get("x5_13"))
+    if np.isfinite(x) and np.sign(x) == s and abs(x) <= 3:
+        out.append("EMA 5 kreuzt EMA 13 in Tradingrichtung")
+    if _f(r.get("stack"), 0) * s >= 3:
+        out.append("EMA-Fächer klar in Tradingrichtung")
+    gap_key = ("gap_below_from", "gap_below_to") if s > 0 else ("gap_above_from", "gap_above_to")
+    g1, g2 = _f(r.get(gap_key[0])), _f(r.get(gap_key[1]))
+    if np.isfinite(g1) and np.isfinite(g2) and min(g1, g2) * 0.98 <= (zl + zh) / 2 <= max(g1, g2) * 1.02:
+        out.append("offenes Gap in der Zone")
+    return out
+
+
+def _pack(r: pd.Series, model: dict) -> dict:
+    conf, parts = confidence(r, model)
+    d = {k: (None if isinstance(v, float) and not math.isfinite(v) else v) for k, v in r.items() if k in KEEP}
+    d.update({"probability": round(float(r["p_avg3"]) * 100),
+              "probability_today": round(float(r["p_win"]) * 100) if np.isfinite(_f(r["p_win"])) else None,
+              "confidence_base": conf, "confidence_parts": parts,
+              "chart_reasons": chart_reasons(r), "ev_R": round(float(r["ev_R"]), 2)})
+    return d
+
+
 def select(res: pd.DataFrame, model: dict | None, state_file: str, asof: str) -> dict:
-    """Top-10 bestimmen und Zustand fortschreiben. asof = Datum der letzten Kerze (YYYY-MM-DD)."""
+    """Phasen-Modell (v3.2): 1 Potenzial → 2 Validierung (Chart hier, News im Bericht) → 3 Timing.
+
+    picks  = handelbare Setups (Kurs in der Zone oder ≤ 1,5 % davor), Long und Short, mit Chartgründen
+    alarm  = saubere Setups 1,5–5 % vor der Zone (Kursalarm setzen, noch nicht handeln)
+    Gedächtnis: Ein Titel bleibt in picks, solange er handelbar bleibt und das Setup gilt.
+    """
     state = {"asof": None, "top": {}, "prev_top": {}}
     if os.path.exists(state_file):
         with open(state_file, encoding="utf-8") as fh:
             state = json.load(fh)
-    # Gleiches Datum nochmal gerechnet (z. B. manueller Lauf): vom Stand davor ausgehen
     prev = state.get("prev_top", {}) if state.get("asof") == asof else state.get("top", {})
     if not model:
-        return {"picks": [], "removed": [], "note": "kein Wahrscheinlichkeitsmodell (backtest.py ausführen)"}
-    p_in, p_out = float(model.get("p_enter", 0.55)), float(model.get("p_exit", 0.47))
+        return {"picks": [], "removed": [], "alarm": [], "note": "kein Wahrscheinlichkeitsmodell"}
+    tr = float(model.get("target_R", 1.0))
 
     res = res.copy()
     res["key"] = res["ticker"] + "::" + res["setup_key"].fillna("")
     res["eligible"] = res.apply(eligible, axis=1)
-    tr = float(model.get("target_R", 1.0))
+    res["ad"] = res["zone_dist_pct"].abs()
     res["ev_R"] = res["p_avg3"] * tr - (1 - res["p_avg3"])
+    res["n_reasons"] = res.apply(lambda r: len(chart_reasons(r)) if r["eligible"] else 0, axis=1)
     by_key = {k: r for k, r in res.set_index("key", drop=False).iterrows()}
     by_ticker = {r["ticker"]: r for _, r in res.iterrows()}
+    pmin = np.where(res["setup"] == "short", P_MIN_SHORT, P_MIN)
+    act = res["eligible"] & (res["ad"] <= ACT_MAX) & (res["p_avg3"] >= pmin) & ~res["earnings_days"].between(0, 3)
 
-    keep, removed = [], []
+    removed, chosen = [], []
     for key, info in prev.items():
         r = by_key.get(key)
-        ok = r is not None and r["eligible"] and _f(r["p_avg3"], 0) >= p_out
-        if ok:
-            keep.append(key)
-        else:
-            rr = r if r is not None else by_ticker.get(key.split("::")[0])
-            removed.append({"ticker": key.split("::")[0], "name": (rr.get("name") if rr is not None else None),
-                            "setup": key.split("::")[1].split("|")[0], "since": info.get("since"),
-                            "reason": exit_reason(rr, key, p_out)})
-
-    new = res[res["eligible"] & ~res["key"].isin(keep) & (res["p_avg3"] >= p_in) & (res["days_valid"] >= MIN_DAYS)
-              & ~res["earnings_days"].between(0, 5)].sort_values("ev_R", ascending=False)
-    chosen, sectors = [], {}
-    for key in sorted(keep, key=lambda k: -_f(by_key[k]["ev_R"], -9)):
-        chosen.append(key)
-        sec = by_key[key].get("sector")
-        sectors[sec] = sectors.get(sec, 0) + 1
-    for _, r in new.iterrows():
+        if r is not None and bool(act.get(r.name, False)):
+            chosen.append(key)
+            continue
+        rr = r if r is not None else by_ticker.get(key.split("::")[0])
+        reason = exit_reason(rr, key, P_MIN)
+        if r is not None and r["eligible"] and r["ad"] > ACT_MAX:
+            reason = "Kurs aus der Zone gelaufen" + (" (Richtung Ziel)" if r["ad"] > 0 else "") + " → Alarm-Liste"
+        removed.append({"ticker": key.split("::")[0], "name": rr.get("name") if rr is not None else None,
+                        "setup": key.split("::")[1].split("|")[0], "since": info.get("since"), "reason": reason})
+    # Neue: Rangfolge nach Anzahl Chartgründe, dann Wahrscheinlichkeit
+    cand = res[act & ~res["key"].isin(chosen)].sort_values(["n_reasons", "p_avg3"], ascending=False)
+    # Platz für Shorts reservieren (bis MAX_SHORTS), Rest Longs
+    shorts = cand[cand["setup"] == "short"].head(MAX_SHORTS)
+    cand = pd.concat([shorts, cand[cand["setup"] == "long"]]).sort_values(["n_reasons", "p_avg3"], ascending=False)
+    cand = pd.concat([shorts, cand[~cand["key"].isin(shorts["key"])]]) if len(shorts) else cand
+    sectors = {}
+    for k in chosen:
+        sectors[by_key[k].get("sector")] = sectors.get(by_key[k].get("sector"), 0) + 1
+    for _, r in cand.iterrows():
         if len(chosen) >= MAX_PICKS:
             break
         if sectors.get(r.get("sector"), 0) >= MAX_PER_SECTOR:
             continue
         chosen.append(r["key"])
         sectors[r.get("sector")] = sectors.get(r.get("sector"), 0) + 1
-    chosen = chosen[:MAX_PICKS]
 
     top, picks = {}, []
     for key in chosen:
         r = by_key[key]
         since = prev.get(key, {}).get("since", asof)
         top[key] = {"since": since}
-        conf, parts = confidence(r, model)
-        inzone = r["zone_dist_pct"] == 0
-        pick = {k: (None if isinstance(v, float) and not math.isfinite(v) else v) for k, v in r.items()
-                if k in ("ticker", "name", "isin", "wkn", "currency", "sector", "setup", "close", "zone_lo",
-                         "zone_hi", "stop", "t1", "t2", "entry", "crv", "crv_entry", "risk_pct", "pot_t1_pct", "weeks_t1",
-                         "ko_level", "ko_leverage", "trend", "ema_text", "stack", "ema20", "ema50", "ema200",
-                         "rsi", "atr_pct", "earnings_days", "status", "candle", "swing_high", "swing_low",
-                         "swing_high_date", "swing_low_date", "gap_below_from", "gap_below_to", "gap_above_from",
-                         "gap_above_to", "days_valid", "p_win")}
-        pick.update({
-            "probability": round(float(r["p_avg3"]) * 100),
-            "probability_today": round(float(r["p_win"]) * 100) if np.isfinite(_f(r["p_win"])) else None,
-            "hist_hit": round(hist_hit(model, float(r["p_avg3"])) * 100),
-            "hit_t2_hist": round(float(model.get("hit_swing_target") or 0) * 100),
-            "ev_R": round(float(r["ev_R"]), 2),
-            "confidence_base": conf, "confidence_parts": parts,
-            "category": "Einstieg jetzt" if inzone else "Limit setzen",
-            "status_report": "neu" if key not in prev else "bleibt",
-            "in_report_since": since,
-        })
-        picks.append(pick)
-    picks.sort(key=lambda p: (-p["probability"], -p["confidence_base"], -p["ev_R"]))
+        p = _pack(r, model)
+        p.update({"category": ("Einstieg jetzt" if r["zone_dist_pct"] == 0 else "Zone fast erreicht"),
+                  "needs_news": r["setup"] == "short" or r["p_avg3"] < 0.52,
+                  "status_report": "neu" if key not in prev else "bleibt", "in_report_since": since})
+        picks.append(p)
+    picks.sort(key=lambda p: (-len(p["chart_reasons"]), -p["probability"], -p["confidence_base"]))
     for i, p in enumerate(picks, 1):
         p["rank"] = i
-
     with open(state_file, "w", encoding="utf-8") as fh:
-        json.dump({"asof": asof, "top": top, "prev_top": prev,
-                   "thresholds": {"p_enter": p_in, "p_exit": p_out}}, fh, ensure_ascii=False, indent=1)
-    watch = res[res["eligible"] & ~res["key"].isin(chosen) & (res["p_avg3"] >= p_in - 0.05)] \
-        .sort_values("ev_R", ascending=False).head(10)
-    # v3.1: Kandidaten für die News-Prüfung. Chart-Setup sauber (Trendfilter, Zone, Stop), Wahrscheinlichkeit aus
-    # dem Chart allein unter der Schwelle, aber ≥ 42 %. Der Bericht prüft Nachrichten/Fundamentales und darf einen
-    # Titel als "News-gestützt" aufnehmen, wenn ≥ 2 konkrete Belege in Tradingrichtung vorliegen.
-    base = res[res["eligible"] & ~res["key"].isin(chosen) & (res["p_avg3"] >= 0.42) & (res["days_valid"] >= 1)]
-    news_c = pd.concat([base[base["setup"] == "short"].sort_values("p_avg3", ascending=False).head(5),
-                        base[base["setup"] == "long"].sort_values("p_avg3", ascending=False).head(5)])
-    news_candidates = []
-    for _, r in news_c.iterrows():
-        conf, parts = confidence(r, model)
-        news_candidates.append({k: (None if isinstance(v, float) and not math.isfinite(v) else v) for k, v in r.items()
-                                if k in ("ticker", "name", "isin", "wkn", "currency", "sector", "setup", "close",
-                                         "zone_lo", "zone_hi", "stop", "t1", "t2", "crv", "risk_pct", "trend",
-                                         "ema_text", "earnings_days", "status", "days_valid", "ko_level",
-                                         "ko_leverage", "weeks_t1", "ema20", "ema50", "ema200")}
-                               | {"probability_chart": round(float(r["p_avg3"]) * 100), "confidence_base": conf})
-    return {"asof": asof, "thresholds": {"p_enter": p_in, "p_exit": p_out}, "picks": picks, "removed": removed,
-            "watch_next": [{"ticker": r["ticker"], "name": r.get("name"), "setup": r["setup"],
-                            "probability": round(float(r["p_avg3"]) * 100), "days_valid": int(r["days_valid"])}
-                           for _, r in watch.iterrows()],
-            "news_candidates": news_candidates,
+        json.dump({"asof": asof, "top": top, "prev_top": prev}, fh, ensure_ascii=False, indent=1)
+
+    al = res[res["eligible"] & (res["ad"] > ACT_MAX) & (res["ad"] <= ALARM_MAX) & (res["p_avg3"] >= pmin)]
+    al = pd.concat([al[al["setup"] == "long"].sort_values("p_avg3", ascending=False).head(6),
+                    al[al["setup"] == "short"].sort_values("p_avg3", ascending=False).head(4)])
+    alarm = []
+    for _, r in al.iterrows():
+        a = _pack(r, model)
+        a["alarm_at"] = round(float(r["zone_hi"] if r["setup"] == "long" else r["zone_lo"]), 2)
+        alarm.append(a)
+    return {"asof": asof, "version": "v3.2 Phasen",
+            "thresholds": {"p_min_long": P_MIN, "p_min_short": P_MIN_SHORT, "act_max_pct": ACT_MAX},
+            "picks": picks, "removed": removed, "alarm": alarm,
             "base_rate": round(float(model.get("base_rate", np.nan)) * 100, 1),
             "model_metrics": model.get("metrics_out_of_sample")}

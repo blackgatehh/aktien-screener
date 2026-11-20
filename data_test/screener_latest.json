@@ -1,5 +1,5 @@
 {
- "generated_utc": "2026-11-19 10:40",
+ "generated_utc": "2026-11-20 14:56",
  "version": "screener-v3 / framework v3.0",
  "universe_size": 4,
  "analysed": 4,
@@ -97,7 +97,8 @@
    "p_avg3": 0.0002,
    "days_valid": 0,
    "setup_key": "long|2026-05-20",
-   "retrace_pct": 60.1887
+   "retrace_pct": 60.1887,
+   "zone_dist_pct": 0.0
   }
  ],
  "top_short": [
@@ -175,7 +176,8 @@
    "p_avg3": 0.0,
    "days_valid": 0,
    "setup_key": "short|2025-11-24",
-   "retrace_pct": 53.4816
+   "retrace_pct": 53.4816,
+   "zone_dist_pct": 0.0
   }
  ],
  "breakouts": [],
@@ -254,7 +256,8 @@
    "p_avg3": 0.0569,
    "days_valid": 0,
    "setup_key": "long|2025-11-28",
-   "retrace_pct": 2.159
+   "retrace_pct": 2.159,
+   "zone_dist_pct": 16.5194
   }
  ],
  "report_pool": [],
