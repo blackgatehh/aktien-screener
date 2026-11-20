@@ -53,7 +53,7 @@ def chip(ax, x, y, text, bg, fg, size=8.5):
 
 
 def render(report: dict, out: str) -> None:
-    picks = sorted(report.get("picks", []), key=lambda p: p.get("rank", 99))[:10]
+    picks = sorted(report.get("picks", []), key=lambda p: p.get("rank", 99))[:14]  # v3.1: 10 Chart + bis 4 News-gestützt
     n = len(picks)
     row_h = 1.3
     head = 1.35
@@ -68,7 +68,7 @@ def render(report: dict, out: str) -> None:
     fig.patch.set_facecolor(BG)
 
     # Kopf
-    ax.text(0.3, H - 0.42, f"Top 10 Trade-Chancen · {report.get('date', '')}", fontsize=15, fontweight="bold", color=INK, va="center")
+    ax.text(0.3, H - 0.42, f"Top {n} Trade-Chancen · {report.get('date', '')}", fontsize=15, fontweight="bold", color=INK, va="center")
     ax.text(0.3, H - 0.82, report.get("market_line", ""), fontsize=9.5, color=MUTED, va="center")
     br = report.get("base_rate")
     ax.text(10.2, H - 0.42, f"Basisquote aller Setups {br:.0f} %".replace(".", ",") if br else "", fontsize=8,
@@ -102,7 +102,7 @@ def render(report: dict, out: str) -> None:
         ax.text(0.85, cy + 0.03, ident, fontsize=7.8, color=MUTED, va="center")
         chip(ax, 0.85, cy - 0.3, "Long" if longs else "Short", "#e3f2e8" if longs else "#fbe4e4",
              GREEN if longs else RED)
-        bg, fg = CAT.get(p.get("category", ""), ("#ecebe6", "#52514e"))
+        bg, fg = next((v for k, v in CAT.items() if k in p.get("category", "")), ("#ecebe6", "#52514e"))
         chip(ax, 1.62, cy - 0.3, p.get("category", ""), bg, fg)
 
         # Wahrscheinlichkeit, Confidence, Eckdaten
