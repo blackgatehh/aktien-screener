@@ -20,6 +20,16 @@ import pandas as pd
 MAX_PICKS, MAX_PER_SECTOR, MIN_DAYS = 10, 3, 1
 
 
+def load_excluded(data_dir: str) -> dict:
+    """Titel, die nicht in picks/alarm dürfen (z. B. laufende Übernahme: Kurs am Angebotspreis verankert,
+    Chartsignale ohne Aussagekraft, kein Swing-Potenzial). Pflege in data/exclude.json: {ticker: grund}."""
+    path = os.path.join(data_dir, "exclude.json")
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        return {k: v for k, v in json.load(fh).items() if not k.startswith("_")}
+
+
 def _f(x, default=np.nan) -> float:
     try:
         x = float(x)
@@ -167,7 +177,8 @@ def select(res: pd.DataFrame, model: dict | None, state_file: str, asof: str) ->
 
     res = res.copy()
     res["key"] = res["ticker"] + "::" + res["setup_key"].fillna("")
-    res["eligible"] = res.apply(eligible, axis=1)
+    excl = load_excluded(os.path.dirname(state_file))
+    res["eligible"] = res.apply(eligible, axis=1) & ~res["ticker"].isin(list(excl))
     res["ad"] = res["zone_dist_pct"].abs()
     res["ev_R"] = res["p_avg3"] * tr - (1 - res["p_avg3"])
     res["n_reasons"] = res.apply(lambda r: len(chart_reasons(r)) if r["eligible"] else 0, axis=1)
@@ -184,6 +195,8 @@ def select(res: pd.DataFrame, model: dict | None, state_file: str, asof: str) ->
             continue
         rr = r if r is not None else by_ticker.get(key.split("::")[0])
         reason = exit_reason(rr, key, P_MIN)
+        if key.split("::")[0] in excl:
+            reason = "Ausgeschlossen: " + excl[key.split("::")[0]]
         if r is not None and r["eligible"] and r["ad"] > ACT_MAX:
             reason = "Kurs aus der Zone gelaufen" + (" (Richtung Ziel)" if r["ad"] > 0 else "") + " → Alarm-Liste"
         removed.append({"ticker": key.split("::")[0], "name": rr.get("name") if rr is not None else None,
